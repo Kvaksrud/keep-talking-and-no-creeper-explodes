@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "no.kvaksrud.nocreeperexplodes.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"CreeperMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

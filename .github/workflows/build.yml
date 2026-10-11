@@ -1,0 +1,70 @@
+# Builds every push and pull request. On main, publishes a GitHub release with the mod jar
+# the first time a version is seen: bump mod_version in gradle.properties to release again.
+
+name: build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: build
+        run: ./gradlew build
+      - name: capture build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Artifacts
+          path: build/libs/
+
+      - name: publish release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prop() { grep "^$1=" gradle.properties | cut -d= -f2-; }
+          MOD_VERSION=$(prop mod_version)
+          MC_VERSION=$(prop minecraft_version)
+          LOADER_VERSION=$(prop loader_version)
+          FABRIC_API_VERSION=$(prop fabric_api_version)
+          TAG="v${MOD_VERSION}+mc${MC_VERSION}"
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already released. Bump mod_version in gradle.properties to publish a new release."
+            exit 0
+          fi
+
+          JAR=$(ls build/libs/*.jar | grep -v -- '-sources\.jar$')
+
+          cat > notes.md <<EOF
+          Keep Talking and No Creeper Explodes **${MOD_VERSION}** for **Minecraft ${MC_VERSION}** (Fabric).
+
+          | Requirement | Version |
+          |---|---|
+          | Minecraft | ${MC_VERSION} |
+          | Fabric Loader | ${LOADER_VERSION} or newer |
+          | Fabric API | ${FABRIC_API_VERSION} or newer |
+          | Java | 25 |
+
+          **Install:** put \`$(basename "$JAR")\` and Fabric API in your \`mods\` folder.
+          EOF
+
+          gh release create "$TAG" "$JAR" \
+            --target "$GITHUB_SHA" \
+            --title "Keep Talking and No Creeper Explodes ${MOD_VERSION} (Minecraft ${MC_VERSION}, Fabric)" \
+            --notes-file notes.md

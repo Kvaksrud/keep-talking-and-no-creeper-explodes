@@ -1,0 +1,8 @@
+{
+	"defuse_beep": {
+		"subtitle": "subtitles.nocreeperexplodes.defuse_beep",
+		"sounds": [
+			"nocreeperexplodes:defuse_beep"
+		]
+	}
+}

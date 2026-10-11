@@ -1,0 +1,11 @@
+{
+	"screen.nocreeperexplodes.title": "Defuse the Creeper",
+	"screen.nocreeperexplodes.hint": "Cut one wire. Only one of them is safe.",
+	"screen.nocreeperexplodes.snip": "*snip*",
+	"screen.nocreeperexplodes.defused": "Defused! ...it looks a little sad about it.",
+	"screen.nocreeperexplodes.time_up": "Out of time!",
+	"message.nocreeperexplodes.busy": "Someone else is already cutting this creeper's wires",
+	"message.nocreeperexplodes.too_far": "Get closer: you must be within 1 block to cut its wires",
+	"message.nocreeperexplodes.already_defused": "This creeper is already defused",
+	"subtitles.nocreeperexplodes.defuse_beep": "Creeper bomb beeps"
+}
