@@ -1,5 +1,6 @@
 package no.kvaksrud.nocreeperexplodes.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
 import org.joml.Vector2i;
@@ -173,7 +174,8 @@ public class WireCutScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		if (this.cutWire < 0 && !this.isTimeUp() && event.button() == 0) {
+		// Not a literal 0: 26.3 moved from GLFW to SDL, where the left button is 1.
+		if (this.cutWire < 0 && !this.isTimeUp() && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
 			int wire = this.wireAt(event.x(), event.y());
 
 			if (wire >= 0) {
