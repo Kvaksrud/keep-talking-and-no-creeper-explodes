@@ -54,6 +54,7 @@ To release, bump `mod_version` in `gradle.properties` and push to `main`.
 
 ## Art and sound
 - **Textures:** `tools/gen_textures.py` draws every texture using only the Python standard library. After changing it, run `python3 tools/gen_textures.py` to rewrite the PNGs in `src/main/resources/assets/nocreeperexplodes/`. It also writes enlarged previews to `build/texture-preview/`. The wire layout constants in `WireCutScreen` mirror the ones in the script.
+- **Logo:** `tools/gen_logo.py` draws `branding/logo.png`, the 512×512 project logo used on CurseForge (a crying creeper behind a "no" sign).
 - **Sound:** `tools/gen_sounds.py` synthesizes the bomb beep, then encodes it to mono Ogg Vorbis with `oggenc` (`brew install vorbis-tools`). Run `python3 tools/gen_sounds.py` to regenerate it.
 
 ## How it works
