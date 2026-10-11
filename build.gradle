@@ -3,7 +3,7 @@ plugins {
 	id 'maven-publish'
 }
 
-// Usual mod file naming: <name>-fabric-<mod version>+mc<minecraft version>.jar
+// Usual mod file naming: ktance-fabric-<mod version>+mc<minecraft version>.jar (Keep Talking And No Creeper Explodes)
 version = "${project.mod_version}+mc${project.minecraft_version}"
 
 base {

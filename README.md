@@ -28,7 +28,7 @@ Get the jar from [Releases](https://github.com/Kvaksrud/keep-talking-and-no-cree
 
 ## Building and running
 ```bash
-./gradlew build              # build/libs/keep-talking-and-no-creeper-explodes-fabric-<version>+mc<mc>.jar
+./gradlew build              # build/libs/ktance-fabric-<version>+mc<mc>.jar
 ./gradlew runClient          # dev client with the mod loaded
 ./gradlew runClientGameTest  # automated in-game test (opens a game window)
 ```
