@@ -1,5 +1,6 @@
-# Builds every push and pull request. On main, publishes a GitHub release with the mod jar
-# the first time a version is seen: bump mod_version in gradle.properties to release again.
+# Builds every push and pull request. On main and the mc/<minecraft version> branches, publishes a
+# GitHub release with the mod jar the first time a version is seen: bump mod_version in
+# gradle.properties to release again. Each branch targets one Minecraft version, so each gets its own tag.
 
 name: build
 on:
@@ -33,7 +34,7 @@ jobs:
           path: build/libs/
 
       - name: publish release
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/mc/'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -51,6 +52,10 @@ jobs:
 
           JAR=$(ls build/libs/*.jar | grep -v -- '-sources\.jar$')
 
+          # "Latest" goes to the newest Minecraft version, not whichever branch happened to release last.
+          NEWEST_MC=$( (gh release list --limit 200 --json tagName --jq '.[].tagName' | sed -n 's/.*+mc//p'; echo "$MC_VERSION") | sort -V | tail -1)
+          LATEST=$([ "$NEWEST_MC" = "$MC_VERSION" ] && echo true || echo false)
+
           cat > notes.md <<EOF
           Keep Talking and No Creeper Explodes **${MOD_VERSION}** for **Minecraft ${MC_VERSION}** (Fabric).
 
@@ -66,5 +71,6 @@ jobs:
 
           gh release create "$TAG" "$JAR" \
             --target "$GITHUB_SHA" \
+            --latest="$LATEST" \
             --title "Keep Talking and No Creeper Explodes ${MOD_VERSION} (Minecraft ${MC_VERSION}, Fabric)" \
             --notes-file notes.md
