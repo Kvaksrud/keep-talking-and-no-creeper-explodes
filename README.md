@@ -18,9 +18,9 @@ Get the jar for your Minecraft version from [Releases](https://github.com/Kvaksr
 
 | Minecraft | Branch | Fabric API | Fabric Loader | Java |
 |---|---|---|---|---|
+| 26.3 | `main` | 0.162.0+26.3 or newer | 0.19.5 or newer | 25 |
+| 26.2 | `mc/26.2` | 0.161.0+26.2 or newer | 0.19.5 or newer | 25 |
 | 26.1.x | `mc/26.1` | 0.145.1+26.1 or newer | 0.19.5 or newer | 25 |
-| 26.2 | `main` | 0.161.0+26.2 or newer | 0.19.5 or newer | 25 |
-| 26.3 | `mc/26.3` | 0.162.0+26.3 or newer | 0.19.5 or newer | 25 |
 
 ## Development requirements
 - JDK 25 (`brew install openjdk@25`, then `export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home`)
@@ -44,7 +44,7 @@ The client game test plays through:
 It saves screenshots to `build/run/clientGameTest/screenshots/nce_*.png`.
 
 ## Releases
-Each Minecraft version lives on its own branch (see the table above). CI builds every push and pull request. On `main` and the `mc/*` branches, the first time it sees a new `mod_version` it does three things:
+`main` always targets the newest Minecraft version, and new work happens there. Older versions live on `mc/<version>` branches (see the table above) for as long as they're supported. When a new Minecraft version comes out, branch the current `main` off as `mc/<old version>`, then update `main`. CI builds every push and pull request. On `main` and the `mc/*` branches, the first time it sees a new `mod_version` it does three things:
 - tags the commit `v<mod_version>+mc<minecraft_version>`;
 - creates a GitHub release with the jar;
 - lists the Minecraft, Fabric Loader, Fabric API and Java versions in the release notes.
