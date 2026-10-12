@@ -1,5 +1,7 @@
 package no.kvaksrud.nocreeperexplodes.test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -7,11 +9,13 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.Window;
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
+import no.kvaksrud.nocreeperexplodes.NoCreeperExplodesConfig;
 import no.kvaksrud.nocreeperexplodes.client.WireCutScreen;
 import org.joml.Vector2d;
 import org.joml.Vector2i;
 import org.spongepowered.asm.mixin.MixinEnvironment;
 
+import net.minecraft.client.gui.screens.DeathScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.client.sounds.SoundEventListener;
 import net.minecraft.core.BlockPos;
@@ -30,14 +34,20 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
 import net.fabricmc.fabric.api.entity.FakePlayer;
+import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * Plays the mod in a real client: too far, cancel, a frozen beeping creeper, a second player, defuse,
- * try to relight, defuse twice, reload, and the 5x blasts for a wrong wire and for running out of time.
+ * Plays the mod in a real client: the settings file, too far, a longer defuse distance, a frozen beeping creeper,
+ * a second player, a defuser who leaves the game or dies, defuse, try to relight, defuse twice, reload, the blasts
+ * for a wrong wire and for running out of time, walking away with Esc or by getting pushed off, and a smaller blast setting.
  * Screenshots land in build/run/clientGameTest/screenshots (prefixed nce_).
  */
 @SuppressWarnings("UnstableApiUsage")
 public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
+	private static final NoCreeperExplodesConfig DEFAULTS = NoCreeperExplodesConfig.DEFAULTS;
+	private static final NoCreeperExplodesConfig ALWAYS_SAFE = new NoCreeperExplodesConfig(DEFAULTS.defuseDistance(), 100.0, DEFAULTS.explosionSizeMultiplier());
+	private static final NoCreeperExplodesConfig NEVER_SAFE = new NoCreeperExplodesConfig(DEFAULTS.defuseDistance(), 0.0, DEFAULTS.explosionSizeMultiplier());
+
 	@Override
 	public void runTest(ClientGameTestContext context) {
 		AtomicInteger beeps = new AtomicInteger();
@@ -59,28 +69,26 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 			singleplayer.getConnection().waitForChunksRender();
 			MixinEnvironment.getCurrentEnvironment().audit();
 
+			// The settings file is written on first start, and holds the defaults.
+			Path configFile = FabricLoader.getInstance().getConfigDir().resolve(NoCreeperExplodesConfig.FILE_NAME);
+			check(Files.isRegularFile(configFile), "Expected the settings file at " + configFile);
+			check(NoCreeperExplodes.config().equals(DEFAULTS), "Expected the default settings, got " + NoCreeperExplodes.config());
+
 			// More than 1 block away: nothing starts.
 			Creeper distant = spawnCreeperFacingPlayer(singleplayer, 0, 3, true);
 			lookAt(context, distant);
 			context.getInput().pressKey(options -> options.keyUse);
 			context.waitTicks(5);
 			check(context.computeOnClient(client -> client.gui.screen() == null), "No panel should open from 3 blocks away");
-			singleplayer.getServer().runOnServer(_ -> {
-				check(!distant.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "No defuse session from 3 blocks away");
-				distant.discard();
-			});
+			singleplayer.getServer().runOnServer(_ -> check(!distant.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "No defuse session from 3 blocks away"));
 
-			// Esc walks away from the bomb: the session ends and nothing else happens.
-			Creeper walkedAway = spawnCreeperFacingPlayer(singleplayer, 1, 0, true);
-			openPanel(context, singleplayer, walkedAway);
-			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
-			context.waitForScreen(null);
-			singleplayer.getConnection().waitForServerboundPackets();
-			singleplayer.getServer().runOnServer(_ -> {
-				check(!walkedAway.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "Esc should end the defuse session");
-				check(walkedAway.isAlive() && !NoCreeperExplodes.isDefused(walkedAway), "Esc should leave the creeper untouched");
-				walkedAway.discard();
-			});
+			// With a 3-block defuse distance it does, and the panel trusts the server's distance rather than closing.
+			NoCreeperExplodes.setConfig(new NoCreeperExplodesConfig(3.0, DEFAULTS.successChancePercent(), DEFAULTS.explosionSizeMultiplier()));
+			openPanel(context, singleplayer, distant);
+			context.waitTicks(10);
+			check(context.computeOnClient(client -> client.gui.screen() instanceof WireCutScreen), "The panel should stay open 3 blocks away with a 3-block distance");
+			removeAndClosePanel(context, singleplayer, distant);
+			NoCreeperExplodes.setConfig(DEFAULTS);
 
 			// While someone is defusing, the creeper is frozen, it beeps, and nobody else can take over.
 			Creeper frozen = spawnCreeperFacingPlayer(singleplayer, -1, 0, false);
@@ -91,7 +99,7 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 				NoCreeperExplodes.tryStartDefuse(FakePlayer.get(singleplayer.getConnection().getServerLevel()), frozen);
 				DefuseSession session = frozen.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
 				check(session != null && session.player().equals(player.getUUID()), "A second player must not take over the defuse");
-				// A laggy double click from the same player must not reopen (and so cancel) the panel.
+				// A laggy double click from the same player must not reopen (and so walk away from) the panel.
 				NoCreeperExplodes.tryStartDefuse(player, frozen);
 				frozen.getNavigation().moveTo(frozen.getX() - 8, frozen.getY(), frozen.getZ(), 1.0);
 				return frozen.position();
@@ -100,24 +108,33 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 			context.takeScreenshot("nce_00_beeping_panel");
 			singleplayer.getServer().runOnServer(_ -> {
 				check(frozen.position().distanceTo(frozenAt) < 0.05, "The creeper must not move while being defused");
-				check(frozen.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A repeated click must not cancel the running defuse");
+				DefuseSession session = frozen.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				check(session != null && !session.walkedAway(), "A repeated click must not end the running defuse");
 			});
 			check(context.computeOnClient(client -> client.gui.screen() instanceof WireCutScreen), "The panel should still be open");
 			check(beeps.get() >= 2, "Expected the bomb to beep while defusing, heard " + beeps.get());
-			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
-			context.waitForScreen(null);
-			singleplayer.getServer().runOnServer(_ -> frozen.discard());
+			removeAndClosePanel(context, singleplayer, frozen);
 
-			// The right wire defuses it.
+			// A defuser who leaves the game lets the creeper go.
+			Creeper abandoned = spawnCreeperFacingPlayer(singleplayer, 1, 0, true);
+			singleplayer.getServer().runOnServer(_ -> abandoned.setAttached(NoCreeperExplodes.DEFUSE_SESSION, DefuseSession.start(UUID.randomUUID(), abandoned.level().getGameTime())));
+			context.waitTicks(5);
+			singleplayer.getServer().runOnServer(_ -> {
+				check(!abandoned.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A defuser who left the game should release the creeper");
+				check(abandoned.isAlive() && !NoCreeperExplodes.isHeld(abandoned), "A released creeper is an ordinary creeper again");
+				abandoned.discard();
+			});
+
+			// With a 100% chance any wire defuses it.
+			NoCreeperExplodes.setConfig(ALWAYS_SAFE);
 			Creeper lucky = spawnCreeperFacingPlayer(singleplayer, 0, 1, true);
 			luckyId = lucky.getUUID();
 			context.takeScreenshot("nce_01_creeper_before");
 			openPanel(context, singleplayer, lucky);
 			context.takeScreenshot("nce_02_wire_panel");
-			int correct = correctWire(singleplayer, lucky);
-			hoverWire(context, (correct + 1) % NoCreeperExplodes.WIRE_COUNT);
+			hoverWire(context, 2);
 			context.takeScreenshot("nce_03_wire_hover");
-			hoverWire(context, correct);
+			hoverWire(context, 1);
 			context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 			context.waitTick();
 			context.takeScreenshot("nce_04_wire_snip");
@@ -125,7 +142,8 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 			context.waitTicks(2);
 			context.takeScreenshot("nce_05_defused_panel");
 			context.waitForScreen(null);
-			singleplayer.getServer().runOnServer(_ -> check(lucky.isAlive() && NoCreeperExplodes.isDefused(lucky), "Right wire should defuse the creeper"));
+			singleplayer.getServer().runOnServer(_ -> check(lucky.isAlive() && NoCreeperExplodes.isDefused(lucky), "A safe cut should defuse the creeper"));
+			NoCreeperExplodes.setConfig(DEFAULTS);
 			context.waitTicks(5);
 			context.takeScreenshot("nce_06_tear");
 
@@ -153,7 +171,26 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 			context.waitTicks(5);
 			check(context.computeOnClient(client -> client.gui.screen() == null), "A defused creeper must not open the panel again");
 			singleplayer.getServer().runOnServer(_ -> check(!lucky.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A defused creeper must not start a new session"));
-			// Let the "already defused" action-bar message fade so it doesn't show up in later screenshots.
+
+			// Dying with the panel open lets the creeper go rather than setting it off.
+			Creeper survivor = spawnCreeperFacingPlayer(singleplayer, 0, -1, true);
+			UUID survivorId = survivor.getUUID();
+			openPanel(context, singleplayer, survivor);
+			singleplayer.getServer().runCommand("kill @p");
+			context.waitForScreen(DeathScreen.class);
+			context.waitTicks(5);
+			singleplayer.getServer().runOnServer(_ -> {
+				check(!survivor.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "Dying should release the creeper, not walk away from it");
+				check(survivor.isAlive() && !NoCreeperExplodes.isHeld(survivor), "Dying should leave an ordinary creeper");
+			});
+			// A dead player keeps no chunks loaded, so the creeper may unload; it must still be there after respawning.
+			context.waitTicks(DefuseSession.WALK_AWAY_TICKS);
+			context.clickScreenButton("deathScreen.respawn");
+			context.waitForScreen(null);
+			singleplayer.getConnection().waitForChunksRender();
+			singleplayer.getServer().waitFor(server -> server.overworld().getEntity(survivorId) instanceof Creeper c && c.isAlive(), 100);
+			singleplayer.getServer().runOnServer(server -> server.overworld().getEntity(survivorId).discard());
+			// Let the action-bar messages fade so they don't show up in later screenshots.
 			context.waitTicks(80);
 		}
 
@@ -166,41 +203,101 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 					"Defused should survive a save and reload"));
 			context.takeScreenshot("nce_07_tear_after_reload");
 
-			// The wrong wire blows it up, 5x bigger than normal. Done last, since it leaves a big crater.
+			// With a 0% chance the wire blows it up, 5x bigger than normal. The blasts come last, since they leave big craters.
+			NoCreeperExplodes.setConfig(NEVER_SAFE);
 			Creeper unlucky = spawnCreeperFacingPlayer(singleplayer, 0, -1, true);
 			BlockPos ground = BlockPos.containing(unlucky.position()).below();
 			openPanel(context, singleplayer, unlucky);
-			hoverWire(context, (correctWire(singleplayer, unlucky) + 1) % NoCreeperExplodes.WIRE_COUNT);
+			hoverWire(context, 0);
 			context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
 			singleplayer.getServer().waitFor(_ -> unlucky.isRemoved(), 40);
 			context.waitForScreen(null);
-			checkBigCrater(singleplayer, ground);
+			checkCrater(singleplayer, ground, true);
+			NoCreeperExplodes.setConfig(DEFAULTS);
 			context.waitTicks(10);
 			context.takeScreenshot("nce_08_crater");
 
 			// Out of time: just as big a bang. Move to fresh ground first, away from the first crater.
-			singleplayer.getServer().runCommand("tp @p 60.5 -60 0.5");
-			singleplayer.getConnection().waitForChunksRender();
+			moveTo(singleplayer, 60);
 			Creeper tooSlow = spawnCreeperFacingPlayer(singleplayer, 0, 1, true);
 			BlockPos tooSlowGround = BlockPos.containing(tooSlow.position()).below();
 			openPanel(context, singleplayer, tooSlow);
 			singleplayer.getServer().runOnServer(_ -> {
 				// Fast-forward: one second left on the clock.
 				DefuseSession session = tooSlow.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
-				tooSlow.setAttached(NoCreeperExplodes.DEFUSE_SESSION, new DefuseSession(session.player(), session.correctWire(), tooSlow.level().getGameTime() + 20));
+				tooSlow.setAttached(NoCreeperExplodes.DEFUSE_SESSION, new DefuseSession(session.player(), tooSlow.level().getGameTime() + 20, false));
 			});
 			singleplayer.getServer().waitFor(_ -> tooSlow.isRemoved(), 60);
 			context.waitForScreen(null);
-			checkBigCrater(singleplayer, tooSlowGround);
+			checkCrater(singleplayer, tooSlowGround, true);
+
+			// Esc walks away from the bomb: it beeps frantically, can't be picked up again, and goes off within 3 seconds.
+			moveTo(singleplayer, 120);
+			Creeper leftBehind = spawnCreeperFacingPlayer(singleplayer, 0, 1, true);
+			BlockPos leftBehindGround = BlockPos.containing(leftBehind.position()).below();
+			openPanel(context, singleplayer, leftBehind);
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.waitForScreen(null);
+			singleplayer.getConnection().waitForServerboundPackets();
+			beeps.set(0);
+			long walkedAwayAt = singleplayer.getServer().computeOnServer(_ -> {
+				DefuseSession session = leftBehind.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				long now = leftBehind.level().getGameTime();
+				check(session != null && session.walkedAway(), "Esc should walk away from the bomb, not defuse or release it");
+				check(session.expiresAt() - now <= DefuseSession.WALK_AWAY_TICKS, "Walking away should leave at most 3 seconds, got " + (session.expiresAt() - now) + " ticks");
+				check(leftBehind.isAlive(), "Walking away gives a moment to run");
+				return now;
+			});
+			lookAt(context, leftBehind);
+			context.getInput().pressKey(options -> options.keyUse);
+			context.waitTicks(20);
+			check(context.computeOnClient(client -> client.gui.screen() == null), "An armed bomb must not open the panel again");
+			check(beeps.get() >= 7, "Expected frantic beeping after walking away, heard " + beeps.get() + " beeps in a second");
+			context.takeScreenshot("nce_09_walked_away");
+			singleplayer.getServer().waitFor(_ -> leftBehind.isRemoved(), DefuseSession.WALK_AWAY_TICKS + 20);
+			long blewUpAt = singleplayer.getServer().computeOnServer(server -> server.overworld().getGameTime());
+			check(blewUpAt - walkedAwayAt <= DefuseSession.WALK_AWAY_TICKS + 2, "Should go off within 3 seconds of walking away, took " + (blewUpAt - walkedAwayAt) + " ticks");
+			checkCrater(singleplayer, leftBehindGround, true);
+
+			// Getting pushed out of reach with the panel open is walking away too.
+			moveTo(singleplayer, 180);
+			Creeper pushedOff = spawnCreeperFacingPlayer(singleplayer, 0, 1, true);
+			BlockPos pushedOffGround = BlockPos.containing(pushedOff.position()).below();
+			openPanel(context, singleplayer, pushedOff);
+			singleplayer.getServer().runCommand("execute as @p at @s run tp @s ~ ~ ~-4");
+			context.waitForScreen(null);
+			singleplayer.getServer().runOnServer(_ -> {
+				DefuseSession session = pushedOff.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				check(session != null && session.walkedAway(), "Getting out of reach should walk away from the bomb");
+			});
+			singleplayer.getServer().waitFor(_ -> pushedOff.isRemoved(), DefuseSession.WALK_AWAY_TICKS + 20);
+			checkCrater(singleplayer, pushedOffGround, true);
+
+			// The blast size is a setting: at 1x it's an ordinary creeper blast.
+			moveTo(singleplayer, 240);
+			NoCreeperExplodes.setConfig(new NoCreeperExplodesConfig(DEFAULTS.defuseDistance(), 0.0, 1.0));
+			Creeper small = spawnCreeperFacingPlayer(singleplayer, 0, 1, true);
+			BlockPos smallGround = BlockPos.containing(small.position()).below();
+			openPanel(context, singleplayer, small);
+			hoverWire(context, 0);
+			context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+			singleplayer.getServer().waitFor(_ -> small.isRemoved(), 40);
+			context.waitForScreen(null);
+			checkCrater(singleplayer, smallGround, false);
+			NoCreeperExplodes.setConfig(DEFAULTS);
 		}
 
 		context.runOnClient(client -> client.getSoundManager().removeListener(beepCounter));
 	}
 
-	/** A normal creeper blast can't reach ground 6 blocks away; a 5x one tears straight through it. */
-	private static void checkBigCrater(TestSingleplayerContext singleplayer, BlockPos ground) {
+	/**
+	 * The blast always takes out the ground under the creeper. A normal creeper blast can't reach ground 6 blocks
+	 * away; a 5x one tears straight through it.
+	 */
+	private static void checkCrater(TestSingleplayerContext singleplayer, BlockPos ground, boolean big) {
 		singleplayer.getServer().runOnServer(_ -> {
 			ServerLevel level = singleplayer.getConnection().getServerLevel();
+			check(level.getBlockState(ground).isAir(), "Expected the blast to take out the ground under the creeper");
 			int destroyed = 0;
 
 			for (BlockPos pos : new BlockPos[] {ground.east(6), ground.west(6), ground.north(6), ground.south(6)}) {
@@ -209,8 +306,18 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 				}
 			}
 
-			check(destroyed == 4, "Expected a 5x crater reaching 6 blocks out, but only " + destroyed + "/4 spots were blown away");
+			if (big) {
+				check(destroyed == 4, "Expected a 5x crater reaching 6 blocks out, but only " + destroyed + "/4 spots were blown away");
+			} else {
+				check(destroyed == 0, "Expected a normal-sized crater, but " + destroyed + "/4 spots 6 blocks out were blown away");
+			}
 		});
+	}
+
+	/** Fresh, flat ground away from earlier craters. */
+	private static void moveTo(TestSingleplayerContext singleplayer, int x) {
+		singleplayer.getServer().runCommand("tp @p " + x + ".5 -60 0.5");
+		singleplayer.getConnection().waitForChunksRender();
 	}
 
 	private static Creeper spawnCreeperFacingPlayer(TestSingleplayerContext singleplayer, int dx, int dz, boolean noAi) {
@@ -245,8 +352,10 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 		check(singleplayer.getServer().computeOnServer(_ -> creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION)), "Right-click should start a defuse session");
 	}
 
-	private static int correctWire(TestSingleplayerContext singleplayer, Creeper creeper) {
-		return singleplayer.getServer().computeOnServer(_ -> creeper.getAttached(NoCreeperExplodes.DEFUSE_SESSION).correctWire());
+	/** Ends a test bomb without a bang: Esc would walk away from it, and that blows it up. */
+	private static void removeAndClosePanel(ClientGameTestContext context, TestSingleplayerContext singleplayer, Creeper creeper) {
+		singleplayer.getServer().runOnServer(_ -> creeper.discard());
+		context.waitForScreen(null);
 	}
 
 	private static void hoverWire(ClientGameTestContext context, int wire) {

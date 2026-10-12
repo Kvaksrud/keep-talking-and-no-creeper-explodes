@@ -1,6 +1,7 @@
 package no.kvaksrud.nocreeperexplodes.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
 import org.joml.Vector2i;
@@ -19,7 +20,8 @@ import net.minecraft.world.entity.monster.Creeper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
 /**
- * The bomb panel: three wires, one of them safe. Everything is drawn from wire_cut.png,
+ * The bomb panel: three wires to choose from. Closing it early (Esc, or getting out of reach) walks away from
+ * the bomb, which sets it off. Everything is drawn from wire_cut.png,
  * whose layout comes from tools/gen_textures.py; the constants below mirror it.
  */
 public class WireCutScreen extends Screen {
@@ -65,6 +67,7 @@ public class WireCutScreen extends Screen {
 	private static final Component TIME_UP = Component.translatable("screen.nocreeperexplodes.time_up");
 
 	private final int creeperId;
+	private final double defuseDistance;
 	private int left;
 	private int top;
 	private int age;
@@ -74,9 +77,10 @@ public class WireCutScreen extends Screen {
 	private int nextBeepAge;
 	private int flashTicks;
 
-	public WireCutScreen(int creeperId) {
+	public WireCutScreen(int creeperId, double defuseDistance) {
 		super(Component.translatable("screen.nocreeperexplodes.title"));
 		this.creeperId = creeperId;
+		this.defuseDistance = defuseDistance;
 	}
 
 	@Override
@@ -137,9 +141,10 @@ public class WireCutScreen extends Screen {
 			return;
 		}
 
-		boolean inRange = this.minecraft.player != null && NoCreeperExplodes.isWithinReach(this.minecraft.player, creeper, NoCreeperExplodes.REACH_TOLERANCE);
+		boolean inRange = this.minecraft.player != null
+				&& NoCreeperExplodes.isWithinReach(this.minecraft.player, creeper, this.defuseDistance + NoCreeperExplodes.REACH_TOLERANCE);
 
-		if (!inRange || this.age >= NoCreeperExplodes.SESSION_TICKS + TIME_UP_TIMEOUT_TICKS) {
+		if (!inRange || this.age >= DefuseSession.SESSION_TICKS + TIME_UP_TIMEOUT_TICKS) {
 			this.onClose();
 		}
 	}
@@ -159,15 +164,15 @@ public class WireCutScreen extends Screen {
 
 		if (this.cutWire < 0 && this.age >= this.nextBeepAge) {
 			this.flashTicks = BEEP_FLASH_TICKS;
-			this.nextBeepAge = this.age + NoCreeperExplodes.beepInterval(NoCreeperExplodes.SESSION_TICKS - this.age);
+			this.nextBeepAge = this.age + DefuseSession.timerBeepInterval(DefuseSession.SESSION_TICKS - this.age);
 		}
 	}
 
 	@Override
 	public void removed() {
 		if (this.cutWire < 0 && !this.isTimeUp() && ClientPlayNetworking.canSend(CutWirePayload.TYPE)) {
-			// Esc or walking away in time: let the creeper have its fuse back.
-			// Once the timer is at zero there is no backing out; the server decides (boom).
+			// Esc or out of reach with time left: walking away from the bomb, which sets it off in a few seconds.
+			// Once the timer is at zero the server blows it up anyway.
 			ClientPlayNetworking.send(new CutWirePayload(this.creeperId, CutWirePayload.CANCEL));
 		}
 	}
@@ -191,7 +196,7 @@ public class WireCutScreen extends Screen {
 	}
 
 	private boolean isTimeUp() {
-		return this.cutWire < 0 && this.age >= NoCreeperExplodes.SESSION_TICKS;
+		return this.cutWire < 0 && this.age >= DefuseSession.SESSION_TICKS;
 	}
 
 	/** Middle of a wire, in GUI coordinates. */
@@ -249,7 +254,7 @@ public class WireCutScreen extends Screen {
 		graphics.fill(this.left + LED_X, this.top + LED_Y, this.left + LED_X + LED_SIZE, this.top + LED_Y + LED_SIZE, this.flashTicks > 0 ? LED_ON : LED_OFF);
 
 		int elapsed = this.cutWire >= 0 ? this.ageAtCut : this.age;
-		int seconds = Math.max(0, (NoCreeperExplodes.SESSION_TICKS - elapsed + 19) / 20);
+		int seconds = Math.max(0, (DefuseSession.SESSION_TICKS - elapsed + 19) / 20);
 		boolean blinkOff = seconds <= 5 && this.cutWire < 0 && (this.age / 5) % 2 == 1;
 
 		if (!blinkOff) {

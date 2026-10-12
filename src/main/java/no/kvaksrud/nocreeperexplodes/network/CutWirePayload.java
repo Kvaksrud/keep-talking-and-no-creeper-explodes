@@ -7,7 +7,7 @@ import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-/** Client to server: the player cut a wire, or walked away from the bomb ({@link #CANCEL}). */
+/** Client to server: the player cut a wire, or walked away from the bomb ({@link #CANCEL}: Esc, or out of reach). */
 public record CutWirePayload(int entityId, int wire) implements CustomPacketPayload {
 	public static final int CANCEL = -1;
 
