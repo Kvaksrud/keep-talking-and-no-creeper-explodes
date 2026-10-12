@@ -255,6 +255,16 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 			context.waitTicks(20);
 			check(context.computeOnClient(client -> client.screen == null), "An armed bomb must not open the panel again");
 			check(beeps.get() >= 7, "Expected frantic beeping after walking away, heard " + beeps.get() + " beeps in a second");
+			singleplayer.getServer().runOnServer(server -> {
+				// Not even a bystander can pick it up once the defuser has left the game.
+				DefuseSession armed = leftBehind.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				leftBehind.setAttached(NoCreeperExplodes.DEFUSE_SESSION, new DefuseSession(UUID.randomUUID(), armed.expiresAt(), true));
+				FakePlayer bystander = FakePlayer.get(server.overworld());
+				bystander.setPos(leftBehind.getX() - 1.0, leftBehind.getY(), leftBehind.getZ());
+				NoCreeperExplodes.tryStartDefuse(bystander, leftBehind);
+				DefuseSession after = leftBehind.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				check(after != null && after.walkedAway(), "Nobody can pick an armed bomb back up");
+			});
 			context.takeScreenshot("nce_09_walked_away");
 			waitForServer(context, singleplayer, server -> leftBehind.isRemoved(), DefuseSession.WALK_AWAY_TICKS + 20);
 			long blewUpAt = singleplayer.getServer().computeOnServer(server -> server.overworld().getGameTime());
