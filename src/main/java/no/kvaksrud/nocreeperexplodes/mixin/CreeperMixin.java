@@ -4,6 +4,7 @@ import no.kvaksrud.nocreeperexplodes.DefusableCreeper;
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.HoldStillWhileDefusingGoal;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
+import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -13,6 +14,8 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Monster;
@@ -68,12 +71,13 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 			at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerLevel;explode(Lnet/minecraft/world/entity/Entity;DDDFLnet/minecraft/world/level/Level$ExplosionInteraction;)V"),
 			index = 4)
 	private float nocreeperexplodes$failedDefuseBoom(float radius) {
-		return this.nocreeperexplodes$failedDefuse ? radius * NoCreeperExplodes.FAILED_DEFUSE_EXPLOSION_MULTIPLIER : radius;
+		return this.nocreeperexplodes$failedDefuse ? radius * (float) NoCreeperExplodes.config().explosionSizeMultiplier() : radius;
 	}
 
 	/**
-	 * Runs the bomb timer: beeps (from the creeper, so everyone nearby hears it) faster and faster,
-	 * and blows up when time runs out. If the defuser dies, leaves or is pushed away, the creeper is let go.
+	 * Runs the bomb timer: beeps (from the creeper, so everyone nearby hears it) faster and faster, and blows up
+	 * when time runs out. If the defuser leaves the game or dies, the creeper is let go; if they get out of reach,
+	 * they walked away from the bomb.
 	 */
 	@Inject(method = "tick", at = @At("HEAD"), cancellable = true)
 	private void nocreeperexplodes$bombTimer(CallbackInfo ci) {
@@ -81,6 +85,7 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 			return;
 		}
 
+		Creeper self = (Creeper) (Object) this;
 		DefuseSession session = this.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
 
 		if (session == null) {
@@ -88,10 +93,19 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 			return;
 		}
 
-		if (NoCreeperExplodes.defuserStillThere((Creeper) (Object) this, session) == null) {
-			this.removeAttached(NoCreeperExplodes.DEFUSE_SESSION);
-			this.nocreeperexplodes$nextBeep = 0L;
-			return;
+		if (!session.walkedAway()) {
+			ServerPlayer defuser = NoCreeperExplodes.sessionPlayer(self, session);
+
+			if (defuser == null) {
+				this.removeAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				this.nocreeperexplodes$nextBeep = 0L;
+				return;
+			}
+
+			if (!NoCreeperExplodes.isStillNextTo(defuser, self)) {
+				this.nocreeperexplodes$walkAway(defuser);
+				session = this.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+			}
 		}
 
 		long now = this.level().getGameTime();
@@ -105,7 +119,7 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 
 		if (now >= this.nocreeperexplodes$nextBeep) {
 			this.level().playSound(null, this.getX(), this.getEyeY(), this.getZ(), NoCreeperExplodes.DEFUSE_BEEP, this.getSoundSource(), 1.0F, 1.0F);
-			this.nocreeperexplodes$nextBeep = now + NoCreeperExplodes.beepInterval(session.expiresAt() - now);
+			this.nocreeperexplodes$nextBeep = now + session.beepInterval(now);
 		}
 	}
 
@@ -113,5 +127,22 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 	public void nocreeperexplodes$explodeFailedDefuse() {
 		this.nocreeperexplodes$failedDefuse = true;
 		this.explodeCreeper();
+	}
+
+	@Override
+	public void nocreeperexplodes$walkAway(@Nullable ServerPlayer player) {
+		DefuseSession session = this.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+
+		if (session == null || session.walkedAway()) {
+			return;
+		}
+
+		this.setAttached(NoCreeperExplodes.DEFUSE_SESSION, session.walkAway(this.level().getGameTime()));
+		// Switch to the frantic beep straight away.
+		this.nocreeperexplodes$nextBeep = 0L;
+
+		if (player != null) {
+			player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.walked_away"));
+		}
 	}
 }

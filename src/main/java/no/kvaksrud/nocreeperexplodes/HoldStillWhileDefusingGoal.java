@@ -6,7 +6,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Creeper;
 
-/** Top-priority goal: while someone is cutting its wires the creeper stands still and stares at them. */
+/**
+ * Top-priority goal: while a bomb timer runs the creeper stands still, staring at whoever is cutting its wires.
+ * Walked away from, it stays put until it goes off.
+ */
 public class HoldStillWhileDefusingGoal extends Goal {
 	private final Creeper creeper;
 
@@ -17,7 +20,7 @@ public class HoldStillWhileDefusingGoal extends Goal {
 
 	@Override
 	public boolean canUse() {
-		return NoCreeperExplodes.activeDefuser(this.creeper) != null;
+		return this.creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION);
 	}
 
 	@Override
