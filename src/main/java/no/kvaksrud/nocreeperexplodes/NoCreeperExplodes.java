@@ -27,26 +27,24 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentSyncPredicate;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.loader.api.FabricLoader;
 
 public class NoCreeperExplodes implements ModInitializer {
 	public static final String MOD_ID = "nocreeperexplodes";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	public static final int WIRE_COUNT = 3;
-	/** How long the bomb timer runs: the creeper holds its fuse while someone is cutting wires. */
-	public static final int SESSION_TICKS = 15 * 20;
-	/** Most empty space, in blocks, allowed between the player and the creeper to start defusing. */
-	public static final double DEFUSE_REACH = 1.0;
-	/** Extra slack once defusing has started, so a nudge doesn't cancel it. */
+	/** Extra slack once defusing has started, so a nudge doesn't count as walking away. */
 	public static final double REACH_TOLERANCE = 0.5;
-	/** A failed defuse (wrong wire, or the timer running out) makes the explosion this many times larger. */
-	public static final float FAILED_DEFUSE_EXPLOSION_MULTIPLIER = 5.0F;
+
+	private static volatile NoCreeperExplodesConfig config = NoCreeperExplodesConfig.DEFAULTS;
 
 	/** Saved with the creeper and synced to every client, so they can draw the tear. */
 	public static final AttachmentType<Boolean> DEFUSED = AttachmentRegistry.create(id("defused"),
@@ -60,6 +58,10 @@ public class NoCreeperExplodes implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		loadConfig();
+		// Read again for every world or server start, so an edit doesn't need a game restart.
+		ServerLifecycleEvents.SERVER_STARTING.register(_ -> loadConfig());
+
 		PayloadTypeRegistry.clientboundPlay().register(OpenWireCutPayload.TYPE, OpenWireCutPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(CutWirePayload.TYPE, CutWirePayload.CODEC);
 
@@ -71,42 +73,51 @@ public class NoCreeperExplodes implements ModInitializer {
 		return Identifier.fromNamespaceAndPath(MOD_ID, path);
 	}
 
+	public static NoCreeperExplodesConfig config() {
+		return config;
+	}
+
+	/** Replaces the settings until the next world or server start; the game tests use this. */
+	public static void setConfig(NoCreeperExplodesConfig newConfig) {
+		config = newConfig;
+	}
+
+	private static void loadConfig() {
+		config = NoCreeperExplodesConfig.load(FabricLoader.getInstance().getConfigDir().resolve(NoCreeperExplodesConfig.FILE_NAME));
+	}
+
 	public static boolean isDefused(Creeper creeper) {
 		return creeper.getAttachedOrElse(DEFUSED, false);
 	}
 
 	/**
-	 * The player currently cutting this creeper's wires, or null. A session only counts while its player
-	 * is online, alive, close by and inside the time limit, so a disconnect or death frees the creeper at once.
+	 * The player cutting this creeper's wires right now, or null: nobody is, the time is up, they walked away,
+	 * or they have left the game or died.
 	 */
 	public static @Nullable ServerPlayer activeDefuser(Creeper creeper) {
 		DefuseSession session = creeper.getAttached(DEFUSE_SESSION);
 
-		if (session == null || !session.isActive(creeper.level().getGameTime())) {
+		if (session == null || session.walkedAway() || !session.isActive(creeper.level().getGameTime())) {
 			return null;
 		}
 
-		return defuserStillThere(creeper, session);
+		ServerPlayer player = sessionPlayer(creeper, session);
+		return player != null && isStillNextTo(player, creeper) ? player : null;
 	}
 
-	/** The session's player, if they are still online, alive and next to the creeper; whether or not time is up. */
-	public static @Nullable ServerPlayer defuserStillThere(Creeper creeper, DefuseSession session) {
+	/** The session's player while they are online and alive, wherever they are; null once they leave the game or die. */
+	public static @Nullable ServerPlayer sessionPlayer(Creeper creeper, DefuseSession session) {
 		if (!(creeper.level() instanceof ServerLevel level)) {
 			return null;
 		}
 
 		ServerPlayer player = level.getServer().getPlayerList().getPlayer(session.player());
-
-		if (player == null || !player.isAlive() || player.level() != level || !isWithinReach(player, creeper, REACH_TOLERANCE)) {
-			return null;
-		}
-
-		return player;
+		return player != null && player.isAlive() ? player : null;
 	}
 
-	/** True while the creeper must not swell: it is defused, or someone is mid-way through cutting its wires. */
+	/** True while the creeper must not swell: it is defused, or a bomb timer is running on it. */
 	public static boolean isHeld(Creeper creeper) {
-		return isDefused(creeper) || activeDefuser(creeper) != null;
+		return isDefused(creeper) || creeper.hasAttached(DEFUSE_SESSION);
 	}
 
 	/** Blocks of empty space between two hitboxes; 0 when they touch or overlap. */
@@ -119,13 +130,14 @@ public class NoCreeperExplodes implements ModInitializer {
 		return Math.sqrt(dx * dx + dy * dy + dz * dz);
 	}
 
-	public static boolean isWithinReach(Player player, Creeper creeper, double tolerance) {
-		return gapBetween(player, creeper) <= DEFUSE_REACH + tolerance;
+	/** At most {@code reach} blocks of empty space between them, in the same world. */
+	public static boolean isWithinReach(Player player, Creeper creeper, double reach) {
+		return player.level() == creeper.level() && gapBetween(player, creeper) <= reach;
 	}
 
-	/** Ticks until the next beep: once a second at the start, speeding up to a frantic beep near zero. */
-	public static int beepInterval(long ticksLeft) {
-		return 3 + (int) (17 * Math.max(0, ticksLeft) / SESSION_TICKS);
+	/** Still close enough to keep cutting: the defuse distance plus a little slack. Further away is walking away. */
+	public static boolean isStillNextTo(Player player, Creeper creeper) {
+		return isWithinReach(player, creeper, config.defuseDistance() + REACH_TOLERANCE);
 	}
 
 	private static InteractionResult onUseEntity(Player player, Level level, InteractionHand hand, Entity entity, @Nullable EntityHitResult hitResult) {
@@ -164,31 +176,44 @@ public class NoCreeperExplodes implements ModInitializer {
 		return InteractionResult.SUCCESS;
 	}
 
-	/** Starts the minigame for this player, unless someone else got there first or they're too far away. */
+	/** Starts the minigame for this player, unless someone else got there first, it's already armed, or they're too far away. */
 	public static void tryStartDefuse(ServerPlayer player, Creeper creeper) {
-		ServerPlayer defuser = activeDefuser(creeper);
+		DefuseSession session = creeper.getAttached(DEFUSE_SESSION);
 
-		if (defuser == player) {
-			// Already cutting this one: a repeated click that arrived before the panel opened.
-			// Opening a second panel would close the first, and that sends a cancel.
+		if (session != null) {
+			if (session.walkedAway()) {
+				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.armed"));
+				return;
+			}
+
+			ServerPlayer defuser = sessionPlayer(creeper, session);
+
+			if (defuser == player) {
+				// Already cutting this one: a repeated click that arrived before the panel opened.
+				// Opening a second panel would close the first, and that counts as walking away.
+				return;
+			}
+
+			if (defuser != null) {
+				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.busy"));
+				return;
+			}
+
+			// Its player left the game or died a moment ago; the creeper is free.
+		}
+
+		double distance = config.defuseDistance();
+
+		if (!isWithinReach(player, creeper, distance)) {
+			String message = distance == 1.0 ? "message.nocreeperexplodes.too_far_one_block" : "message.nocreeperexplodes.too_far";
+			player.sendOverlayMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)));
 			return;
 		}
 
-		if (defuser != null) {
-			player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.busy"));
-			return;
-		}
-
-		if (!isWithinReach(player, creeper, 0.0)) {
-			player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.too_far"));
-			return;
-		}
-
-		long now = creeper.level().getGameTime();
-		creeper.setAttached(DEFUSE_SESSION, new DefuseSession(player.getUUID(), creeper.getRandom().nextInt(WIRE_COUNT), now + SESSION_TICKS));
+		creeper.setAttached(DEFUSE_SESSION, DefuseSession.start(player.getUUID(), creeper.level().getGameTime()));
 		creeper.setSwellDir(-1);
 		creeper.getNavigation().stop();
-		ServerPlayNetworking.send(player, new OpenWireCutPayload(creeper.getId()));
+		ServerPlayNetworking.send(player, new OpenWireCutPayload(creeper.getId(), distance));
 	}
 
 	private static void onCutWire(CutWirePayload payload, ServerPlayNetworking.Context context) {
@@ -200,29 +225,32 @@ public class NoCreeperExplodes implements ModInitializer {
 
 		DefuseSession session = creeper.getAttached(DEFUSE_SESSION);
 
-		if (session == null || !session.player().equals(player.getUUID())) {
+		if (session == null || session.walkedAway() || !session.player().equals(player.getUUID())) {
+			return;
+		}
+
+		if (!player.isAlive()) {
+			// The panel closes when its player dies; that lets the creeper go rather than setting it off.
+			creeper.removeAttached(DEFUSE_SESSION);
+			return;
+		}
+
+		if (!session.isActive(creeper.level().getGameTime())) {
+			// Too late: the timer ran out before this cut (or Esc) arrived.
+			creeper.removeAttached(DEFUSE_SESSION);
+			((DefusableCreeper) creeper).nocreeperexplodes$explodeFailedDefuse();
+			return;
+		}
+
+		if (payload.wire() < 0 || payload.wire() >= WIRE_COUNT || !isStillNextTo(player, creeper)) {
+			// Esc, or the panel closed because they got pushed away: they walked away from a live bomb.
+			((DefusableCreeper) creeper).nocreeperexplodes$walkAway(player);
 			return;
 		}
 
 		creeper.removeAttached(DEFUSE_SESSION);
 
-		if (defuserStillThere(creeper, session) != player) {
-			// Pushed away (or otherwise gone): the creeper just goes back to being a creeper.
-			return;
-		}
-
-		if (!session.isActive(creeper.level().getGameTime())) {
-			// Too late: the timer ran out before this cut (or cancel) arrived.
-			((DefusableCreeper) creeper).nocreeperexplodes$explodeFailedDefuse();
-			return;
-		}
-
-		if (payload.wire() < 0 || payload.wire() >= WIRE_COUNT) {
-			// Backed out in time.
-			return;
-		}
-
-		if (payload.wire() == session.correctWire()) {
+		if (config.isSafeCut(creeper.getRandom().nextDouble())) {
 			defuse(creeper);
 		} else {
 			((DefusableCreeper) creeper).nocreeperexplodes$explodeFailedDefuse();

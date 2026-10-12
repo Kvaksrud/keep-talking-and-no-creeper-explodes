@@ -16,7 +16,7 @@ public class NoCreeperExplodesClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		ClientPlayNetworking.registerGlobalReceiver(OpenWireCutPayload.TYPE, (payload, context) ->
-				context.client().setScreen(new WireCutScreen(payload.entityId())));
+				context.client().setScreen(new WireCutScreen(payload.entityId(), payload.defuseDistance())));
 
 		LivingEntityRenderLayerRegistrationCallback.EVENT.register((entityType, entityRenderer, registrationHelper, context) -> {
 			if (entityRenderer instanceof CreeperRenderer creeperRenderer) {
