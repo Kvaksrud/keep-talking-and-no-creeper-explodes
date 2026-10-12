@@ -3,7 +3,7 @@ package no.kvaksrud.nocreeperexplodes;
 import com.mojang.serialization.Codec;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
 import no.kvaksrud.nocreeperexplodes.network.OpenWireCutPayload;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,7 +11,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
@@ -60,17 +60,17 @@ public class NoCreeperExplodes implements ModInitializer {
 	public void onInitialize() {
 		loadConfig();
 		// Read again for every world or server start, so an edit doesn't need a game restart.
-		ServerLifecycleEvents.SERVER_STARTING.register(_ -> loadConfig());
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> loadConfig());
 
-		PayloadTypeRegistry.clientboundPlay().register(OpenWireCutPayload.TYPE, OpenWireCutPayload.CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(CutWirePayload.TYPE, CutWirePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(OpenWireCutPayload.TYPE, OpenWireCutPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(CutWirePayload.TYPE, CutWirePayload.CODEC);
 
 		UseEntityCallback.EVENT.register(NoCreeperExplodes::onUseEntity);
 		ServerPlayNetworking.registerGlobalReceiver(CutWirePayload.TYPE, NoCreeperExplodes::onCutWire);
 	}
 
-	public static Identifier id(String path) {
-		return Identifier.fromNamespaceAndPath(MOD_ID, path);
+	public static ResourceLocation id(String path) {
+		return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
 	}
 
 	public static NoCreeperExplodesConfig config() {
@@ -158,7 +158,7 @@ public class NoCreeperExplodes implements ModInitializer {
 			}
 
 			if (player instanceof ServerPlayer serverPlayer) {
-				serverPlayer.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.already_defused"));
+				serverPlayer.displayClientMessage(Component.translatable("message.nocreeperexplodes.already_defused"), true);
 			}
 
 			return InteractionResult.SUCCESS;
@@ -182,7 +182,7 @@ public class NoCreeperExplodes implements ModInitializer {
 
 		if (session != null) {
 			if (session.walkedAway()) {
-				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.armed"));
+				player.displayClientMessage(Component.translatable("message.nocreeperexplodes.armed"), true);
 				return;
 			}
 
@@ -195,7 +195,7 @@ public class NoCreeperExplodes implements ModInitializer {
 			}
 
 			if (defuser != null) {
-				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.busy"));
+				player.displayClientMessage(Component.translatable("message.nocreeperexplodes.busy"), true);
 				return;
 			}
 
@@ -206,7 +206,7 @@ public class NoCreeperExplodes implements ModInitializer {
 
 		if (!isWithinReach(player, creeper, distance)) {
 			String message = distance == 1.0 ? "message.nocreeperexplodes.too_far_one_block" : "message.nocreeperexplodes.too_far";
-			player.sendOverlayMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)));
+			player.displayClientMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)), true);
 			return;
 		}
 
@@ -219,7 +219,17 @@ public class NoCreeperExplodes implements ModInitializer {
 	private static void onCutWire(CutWirePayload payload, ServerPlayNetworking.Context context) {
 		ServerPlayer player = context.player();
 
-		if (!(player.level().getEntity(payload.entityId()) instanceof Creeper creeper) || !creeper.isAlive()) {
+		if (player.level().getEntity(payload.entityId()) instanceof Creeper creeper) {
+			cutWire(player, creeper, payload.wire());
+		}
+	}
+
+	/**
+	 * A wire cut on this player's panel ({@link CutWirePayload#CANCEL}: Esc, or out of reach). Ignored unless they are
+	 * the creeper's defuser. Public so the game tests can cut wires without a client.
+	 */
+	public static void cutWire(ServerPlayer player, Creeper creeper, int wire) {
+		if (!creeper.isAlive()) {
 			return;
 		}
 
@@ -242,7 +252,7 @@ public class NoCreeperExplodes implements ModInitializer {
 			return;
 		}
 
-		if (payload.wire() < 0 || payload.wire() >= WIRE_COUNT || !isStillNextTo(player, creeper)) {
+		if (wire < 0 || wire >= WIRE_COUNT || !isStillNextTo(player, creeper)) {
 			// Esc, or the panel closed because they got pushed away: they walked away from a live bomb.
 			((DefusableCreeper) creeper).nocreeperexplodes$walkAway(player);
 			return;

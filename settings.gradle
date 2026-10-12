@@ -9,5 +9,10 @@ pluginManagement {
 	}
 }
 
+plugins {
+	// Downloads the Java version in gradle.properties (java_version) when this machine doesn't have it.
+	id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
 // Should match your modid
 rootProject.name = 'keep-talking-and-no-creeper-explodes'

@@ -1,5 +1,6 @@
 plugins {
-	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	// 1.21.1 is obfuscated, so this is the remapping flavour of Loom (newer versions use net.fabricmc.fabric-loom).
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
 	id 'maven-publish'
 }
 
@@ -30,23 +31,49 @@ loom {
 }
 
 fabricApi {
-	// Automated in-game tests live in src/gametest; run them with ./gradlew runClientGameTest
+	// Automated in-game tests live in src/gametest. There are no client game tests on 1.21.1, so they are
+	// server game tests; the gameTest run below starts them with ./gradlew runGameTest.
 	configureTests {
 		createSourceSet = true
 		modId = "nocreeperexplodes-test"
-		// Server game tests need eula = true (agreeing to the Minecraft EULA), so only the client tests are on.
+		// Turning this on would also make ./gradlew build start a game server; the run below doesn't.
 		enableGameTests = false
-		enableClientGameTests = true
+		enableClientGameTests = false
 	}
+}
+
+// Below fabricApi, which creates the gametest source set.
+loom {
+	runs {
+		// Headless test server: runs every @GameTest in src/gametest, then stops. Fails if a test fails.
+		gameTest {
+			server()
+			name = "Game Test"
+			source sourceSets.gametest
+			property "fabric-api.gametest"
+			property "fabric-api.gametest.report-file", "${layout.buildDirectory.get().asFile}/run/gameTest/junit.xml"
+			runDir "build/run/gameTest"
+		}
+	}
+}
+
+// A fresh test server every time, so the settings file and the test world are written from scratch.
+def cleanGameTestRun = tasks.register("cleanGameTestRun", Delete) {
+	delete layout.buildDirectory.dir("run/gameTest")
+}
+
+tasks.named("runGameTest") {
+	dependsOn cleanGameTestRun
 }
 
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
-	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	// Unit tests for the parts that don't need a running game (settings file, bomb timer); ./gradlew test
 	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
@@ -81,8 +108,10 @@ java {
 	// If you remove this line, sources will not be generated.
 	withSourcesJar()
 
-	sourceCompatibility = JavaVersion.toVersion(project.java_version)
-	targetCompatibility = JavaVersion.toVersion(project.java_version)
+	// Compiles, tests and runs the game on this Java version, downloading it if needed (see settings.gradle).
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(project.java_version as int)
+	}
 }
 
 jar {

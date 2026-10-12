@@ -4,16 +4,13 @@ import com.mojang.blaze3d.platform.InputConstants;
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
-import org.joml.Vector2i;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.monster.Creeper;
 
@@ -25,7 +22,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
  * whose layout comes from tools/gen_textures.py; the constants below mirror it.
  */
 public class WireCutScreen extends Screen {
-	private static final Identifier SHEET = NoCreeperExplodes.id("textures/gui/wire_cut.png");
+	private static final ResourceLocation SHEET = NoCreeperExplodes.id("textures/gui/wire_cut.png");
 	private static final int SHEET_SIZE = 256;
 	private static final int PANEL_W = 176;
 	private static final int PANEL_H = 112;
@@ -93,11 +90,6 @@ public class WireCutScreen extends Screen {
 	public boolean isPauseScreen() {
 		// The creeper holds its fuse while you work, but the world keeps going.
 		return false;
-	}
-
-	@Override
-	public boolean isInGameUi() {
-		return true;
 	}
 
 	private @Nullable Creeper creeper() {
@@ -178,30 +170,25 @@ public class WireCutScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		// Not a literal 0: 26.3 moved from GLFW to SDL, where the left button is 1.
-		if (this.cutWire < 0 && !this.isTimeUp() && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
-			int wire = this.wireAt(event.x(), event.y());
+	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		if (this.cutWire < 0 && !this.isTimeUp() && button == InputConstants.MOUSE_BUTTON_LEFT) {
+			int wire = this.wireAt(mouseX, mouseY);
 
 			if (wire >= 0) {
 				this.cutWire = wire;
 				this.ageAtCut = this.age;
-				this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.SHEARS_SNIP, 1.0F));
+				// 1.21.1 has no shears snip sound yet; the sheep shear sound is the same recording.
+				this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.SHEEP_SHEAR, 1.0F));
 				ClientPlayNetworking.send(new CutWirePayload(this.creeperId, wire));
 				return true;
 			}
 		}
 
-		return super.mouseClicked(event, doubleClick);
+		return super.mouseClicked(mouseX, mouseY, button);
 	}
 
 	private boolean isTimeUp() {
 		return this.cutWire < 0 && this.age >= DefuseSession.SESSION_TICKS;
-	}
-
-	/** Middle of a wire, in GUI coordinates. */
-	public Vector2i wireCenter(int wire) {
-		return new Vector2i(this.left + WIRE_X + WIRE_W / 2, this.top + WIRE_ROWS[wire]);
 	}
 
 	private int wireAt(double mouseX, double mouseY) {
@@ -220,34 +207,40 @@ public class WireCutScreen extends Screen {
 		return -1;
 	}
 
+	/** The world stays in view behind a light shade, like behind the inventory, instead of the blurred menu background. */
 	@Override
-	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
-		super.extractRenderState(graphics, mouseX, mouseY, a);
+	public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+		this.renderTransparentBackground(graphics);
+	}
 
-		graphics.blit(RenderPipelines.GUI_TEXTURED, SHEET, this.left, this.top, 0, 0, PANEL_W, PANEL_H, SHEET_SIZE, SHEET_SIZE);
+	@Override
+	public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+		super.render(graphics, mouseX, mouseY, partialTick);
+
+		graphics.blit(SHEET, this.left, this.top, 0, 0, PANEL_W, PANEL_H, SHEET_SIZE, SHEET_SIZE);
 
 		int hovered = this.cutWire < 0 && !this.isTimeUp() ? this.wireAt(mouseX, mouseY) : -1;
 
 		for (int i = 0; i < WIRE_ROWS.length; i++) {
 			int variant = i == this.cutWire ? VARIANT_CUT : i == hovered ? VARIANT_HOVER : VARIANT_INTACT;
 			int v = WIRE_SHEET_Y + (i * 3 + variant) * WIRE_H;
-			graphics.blit(RenderPipelines.GUI_TEXTURED, SHEET, this.left + WIRE_X, this.top + WIRE_ROWS[i] - WIRE_H / 2, 0, v, WIRE_W, WIRE_H, SHEET_SIZE, SHEET_SIZE);
+			graphics.blit(SHEET, this.left + WIRE_X, this.top + WIRE_ROWS[i] - WIRE_H / 2, 0, v, WIRE_W, WIRE_H, SHEET_SIZE, SHEET_SIZE);
 		}
 
-		this.extractTimer(graphics);
+		this.renderTimer(graphics);
 
-		graphics.centeredText(this.font, this.title, this.width / 2, this.top - 14, TEXT_WHITE);
+		graphics.drawCenteredString(this.font, this.title, this.width / 2, this.top - 14, TEXT_WHITE);
 		Component status = this.defusedFor >= 0 ? DEFUSED : this.cutWire >= 0 ? SNIP : this.isTimeUp() ? TIME_UP : HINT;
 		int statusColor = this.defusedFor >= 0 ? TEXT_GOOD : this.isTimeUp() ? TEXT_BAD : TEXT_HINT;
-		graphics.centeredText(this.font, status, this.width / 2, this.top + PANEL_H + 6, statusColor);
+		graphics.drawCenteredString(this.font, status, this.width / 2, this.top + PANEL_H + 6, statusColor);
 	}
 
-	private void extractTimer(GuiGraphicsExtractor graphics) {
+	private void renderTimer(GuiGraphics graphics) {
 		int x = this.left + PANEL_W / 2;
 		int y = this.top + LCD_TEXT_Y;
 
 		if (this.defusedFor >= 0) {
-			graphics.centeredText(this.font, "SAFE", x, y, LCD_GREEN);
+			graphics.drawCenteredString(this.font, "SAFE", x, y, LCD_GREEN);
 			return;
 		}
 
@@ -258,7 +251,7 @@ public class WireCutScreen extends Screen {
 		boolean blinkOff = seconds <= 5 && this.cutWire < 0 && (this.age / 5) % 2 == 1;
 
 		if (!blinkOff) {
-			graphics.centeredText(this.font, String.format("%d:%02d", seconds / 60, seconds % 60), x, y, LCD_RED);
+			graphics.drawCenteredString(this.font, String.format("%d:%02d", seconds / 60, seconds % 60), x, y, LCD_RED);
 		}
 	}
 }

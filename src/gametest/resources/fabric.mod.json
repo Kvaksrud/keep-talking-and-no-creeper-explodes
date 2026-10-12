@@ -5,8 +5,8 @@
 	"name": "Keep Talking and No Creeper Explodes: tests",
 	"environment": "*",
 	"entrypoints": {
-		"fabric-client-gametest": [
-			"no.kvaksrud.nocreeperexplodes.test.NoCreeperExplodesClientGameTest"
+		"fabric-gametest": [
+			"no.kvaksrud.nocreeperexplodes.test.NoCreeperExplodesGameTest"
 		]
 	},
 	"depends": {

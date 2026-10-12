@@ -19,16 +19,12 @@
 		]
 	},
 	"mixins": [
-		"nocreeperexplodes.mixins.json",
-		{
-			"config": "nocreeperexplodes.client.mixins.json",
-			"environment": "client"
-		}
+		"nocreeperexplodes.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.19.5",
-		"minecraft": "~26.3",
-		"java": ">=25",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
 		"fabric-api": "*"
 	}
 }

@@ -4,7 +4,7 @@ import no.kvaksrud.nocreeperexplodes.DefusableCreeper;
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.HoldStillWhileDefusingGoal;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -68,7 +68,7 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 
 	@ModifyArg(
 			method = "explodeCreeper",
-			at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerLevel;explode(Lnet/minecraft/world/entity/Entity;DDDFLnet/minecraft/world/level/Level$ExplosionInteraction;)V"),
+			at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;explode(Lnet/minecraft/world/entity/Entity;DDDFLnet/minecraft/world/level/Level$ExplosionInteraction;)Lnet/minecraft/world/level/Explosion;"),
 			index = 4)
 	private float nocreeperexplodes$failedDefuseBoom(float radius) {
 		return this.nocreeperexplodes$failedDefuse ? radius * (float) NoCreeperExplodes.config().explosionSizeMultiplier() : radius;
@@ -142,7 +142,7 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 		this.nocreeperexplodes$nextBeep = 0L;
 
 		if (player != null) {
-			player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.walked_away"));
+			player.displayClientMessage(Component.translatable("message.nocreeperexplodes.walked_away"), true);
 		}
 	}
 }

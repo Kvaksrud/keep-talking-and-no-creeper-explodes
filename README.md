@@ -30,7 +30,7 @@ Get the jar for your Minecraft version and mod loader from [Releases](https://gi
 | 26.3 | Fabric | `main` | Fabric Loader 0.19.5+, Fabric API 0.162.0+26.3+ | 25 |
 | 26.2 | Fabric | `mc/26.2` | Fabric Loader 0.19.5+, Fabric API 0.161.0+26.2+ | 25 |
 | 26.1.x | Fabric | `mc/26.1` | Fabric Loader 0.19.5+, Fabric API 0.145.1+26.1+ | 25 |
-| 1.21.1 | Fabric | `mc/1.21.1` | Fabric Loader 0.16.10+, Fabric API 0.116.17+1.21.1+ | 21 |
+| 1.21.1 | Fabric | `mc/1.21.1` | Fabric Loader 0.19.5+, Fabric API 0.116.17+1.21.1+ | 21 |
 | 1.21.1 | NeoForge | `neoforge/1.21.1` | NeoForge 21.1.259+ | 21 |
 
 ## Development requirements
