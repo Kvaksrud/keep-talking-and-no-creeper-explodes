@@ -50,7 +50,7 @@ public class NoCreeperExplodes implements ModInitializer {
 	public static final AttachmentType<Boolean> DEFUSED = AttachmentRegistry.create(id("defused"),
 			builder -> builder.persistent(Codec.BOOL).syncWith(ByteBufCodecs.BOOL, AttachmentSyncPredicate.all()));
 
-	/** Server-only: never saved or synced, so the correct wire can't be read by the client. */
+	/** Server-only: never saved or synced. The server alone runs the bomb timer and decides each cut. */
 	public static final AttachmentType<DefuseSession> DEFUSE_SESSION = AttachmentRegistry.create(id("defuse_session"));
 
 	public static final SoundEvent DEFUSE_BEEP = Registry.register(BuiltInRegistries.SOUND_EVENT, id("defuse_beep"),

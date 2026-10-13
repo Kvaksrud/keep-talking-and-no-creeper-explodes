@@ -1,6 +1,6 @@
 # Keep Talking and No Creeper Explodes
 
-A mod for Minecraft (Fabric and NeoForge). Get within 1 block of a creeper and right-click it with an empty hand. A bomb panel opens with three wires and a 15-second timer, and only one wire is safe.
+A mod for Minecraft (Fabric and NeoForge). Get within 1 block of a creeper and right-click it with an empty hand. A bomb panel opens with three wires and a 15-second timer, and only one wire is safe (the odds are a [setting](#settings)).
 
 - **Right wire:** the creeper is defused for good. It never hisses or explodes again, even if lit with flint and steel or charged by lightning. It keeps following you around, with a tear under its right eye.
 - **Wrong wire, or the timer runs out:** it explodes on the spot, 5× bigger than a normal creeper (a charged one hits 10× a normal creeper's blast).
