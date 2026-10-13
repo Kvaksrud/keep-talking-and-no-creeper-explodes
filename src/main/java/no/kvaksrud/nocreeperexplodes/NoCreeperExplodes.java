@@ -60,7 +60,7 @@ public class NoCreeperExplodes {
 			() -> AttachmentType.builder(() -> false).serialize(Codec.BOOL).sync((holder, player) -> hasMod(player), ByteBufCodecs.BOOL).build());
 
 	/**
-	 * Server-only: never saved or synced, so the correct wire can't be read by the client. There is no default
+	 * Server-only: never saved or synced. The server alone runs the bomb timer and decides each cut. There is no default
 	 * session: read it with getExistingDataOrNull or hasData.
 	 */
 	public static final Supplier<AttachmentType<DefuseSession>> DEFUSE_SESSION = ATTACHMENT_TYPES.register("defuse_session",
