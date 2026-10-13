@@ -18,7 +18,8 @@ repositories {
 }
 
 sourceSets {
-	// Server game tests (./gradlew runGameTestServer): loaded as part of the mod in the game test run, left out of the jar.
+	// The server game tests (./gradlew runGameTestServer) and the client smoke test (./gradlew runClientSmokeTest):
+	// part of the mod in dev runs, left out of the jar.
 	gametest {
 		compileClasspath += sourceSets.main.output
 		runtimeClasspath += sourceSets.main.output
@@ -52,6 +53,15 @@ neoForge {
 			gameDirectory = layout.buildDirectory.dir('run/gameTestServer')
 			systemProperty 'neoforge.enabledGameTestNamespaces', 'nocreeperexplodes'
 		}
+
+		// Plays through the client side in a real game window, then quits; see ClientSmokeTest.
+		// It needs a display, so it's not part of build or CI.
+		clientSmokeTest {
+			client()
+			sourceSet = sourceSets.gametest
+			gameDirectory = layout.buildDirectory.dir('run/clientSmokeTest')
+			systemProperty 'nocreeperexplodes.clientSmokeTest', 'true'
+		}
 	}
 
 	mods {
@@ -70,6 +80,15 @@ tasks.named('runGameTestServer') {
 	// Start without a settings file, so the game test sees it written with the defaults.
 	def settingsFile = layout.buildDirectory.file('run/gameTestServer/config/nocreeperexplodes.properties').get().asFile
 	doFirst { settingsFile.delete() }
+}
+
+tasks.named('runClientSmokeTest') {
+	// A fresh game directory every time: new options, settings file, world and screenshots.
+	def gameDir = layout.buildDirectory.dir('run/clientSmokeTest').get().asFile
+	doFirst {
+		gameDir.deleteDir()
+		gameDir.mkdirs()
+	}
 }
 
 dependencies {

@@ -5,6 +5,7 @@ import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
 import org.jetbrains.annotations.Nullable;
+import org.joml.Vector2i;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -203,6 +204,11 @@ public class WireCutScreen extends Screen {
 
 	private boolean isTimeUp() {
 		return this.cutWire < 0 && this.age >= DefuseSession.SESSION_TICKS;
+	}
+
+	/** Middle of a wire, in GUI coordinates. */
+	public Vector2i wireCenter(int wire) {
+		return new Vector2i(this.left + WIRE_X + WIRE_W / 2, this.top + WIRE_ROWS[wire]);
 	}
 
 	private int wireAt(double mouseX, double mouseY) {

@@ -44,7 +44,7 @@ On this branch (`neoforge/1.21.1`):
 ./gradlew runGameTestServer  # automated in-game tests on a headless test server (no window)
 ```
 
-The 1.21.1 branches download Java 21 for Gradle on their own the first time. On `mc/1.21.1` the in-game tests run with `./gradlew runGameTest`. On the 26.x branches it's `./gradlew runClientGameTest`, which opens a game window, and the jar is `ktance-fabric-<version>+mc<mc>.jar`.
+The 1.21.1 branches download Java 21 for Gradle on their own the first time, and here `./gradlew runClientSmokeTest` plays through the client side in a game window (screenshots in `build/run/clientSmokeTest/screenshots`). On `mc/1.21.1` the in-game tests run with `./gradlew runGameTest`. On the 26.x branches it's `./gradlew runClientGameTest`, which opens a game window, and the jar is `ktance-fabric-<version>+mc<mc>.jar`.
 
 The unit tests (`./gradlew test`) cover the settings file (defaults, custom values, typos, out-of-range values, missing keys) and the bomb timer (the 3-second walk-away fuse, the beep speed). The game tests play through:
 - the settings file being written with the defaults;
