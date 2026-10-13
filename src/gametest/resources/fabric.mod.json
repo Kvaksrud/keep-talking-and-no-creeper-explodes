@@ -7,6 +7,9 @@
 	"entrypoints": {
 		"fabric-gametest": [
 			"no.kvaksrud.nocreeperexplodes.test.NoCreeperExplodesGameTest"
+		],
+		"client": [
+			"no.kvaksrud.nocreeperexplodes.test.NoCreeperExplodesClientSmokeTest"
 		]
 	},
 	"depends": {

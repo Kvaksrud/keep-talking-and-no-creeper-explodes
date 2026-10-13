@@ -54,16 +54,28 @@ loom {
 			property "fabric-api.gametest.report-file", "${layout.buildDirectory.get().asFile}/run/gameTest/junit.xml"
 			runDir "build/run/gameTest"
 		}
+
+		// Opens a game window and plays the client side through (panel, tear, beeps), then quits: see
+		// NoCreeperExplodesClientSmokeTest. Needs a display, so it's for local runs only, not CI or ./gradlew build.
+		clientSmokeTest {
+			client()
+			name = "Client Smoke Test"
+			source sourceSets.gametest
+			property "nocreeperexplodes.clientSmokeTest"
+			runDir "build/run/clientSmokeTest"
+		}
 	}
 }
 
-// A fresh test server every time, so the settings file and the test world are written from scratch.
-def cleanGameTestRun = tasks.register("cleanGameTestRun", Delete) {
-	delete layout.buildDirectory.dir("run/gameTest")
-}
+// A fresh game every time, so the settings file and the test world are written from scratch.
+["gameTest", "clientSmokeTest"].each { run ->
+	def clean = tasks.register("clean${run.capitalize()}Run", Delete) {
+		delete layout.buildDirectory.dir("run/${run}")
+	}
 
-tasks.named("runGameTest") {
-	dependsOn cleanGameTestRun
+	tasks.named("run${run.capitalize()}") {
+		dependsOn clean
+	}
 }
 
 dependencies {

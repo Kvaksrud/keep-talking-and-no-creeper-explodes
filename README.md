@@ -44,7 +44,7 @@ On the 26.x branches:
 ./gradlew runClientGameTest  # automated in-game test (opens a game window)
 ```
 
-The 1.21.1 branches download Java 21 for Gradle on their own the first time. On those branches the in-game tests run on a headless test server: `./gradlew runGameTest` on `mc/1.21.1`, and `./gradlew runGameTestServer` on `neoforge/1.21.1`.
+The 1.21.1 branches download Java 21 for Gradle on their own the first time. On those branches the in-game tests run on a headless test server: `./gradlew runGameTest` on `mc/1.21.1` (where `./gradlew runClientSmokeTest` also plays through the client side in a game window), and `./gradlew runGameTestServer` on `neoforge/1.21.1`.
 
 The unit tests (`./gradlew test`) cover the settings file (defaults, custom values, typos, out-of-range values, missing keys) and the bomb timer (the 3-second walk-away fuse, the beep speed). The game tests play through:
 - the settings file being written with the defaults;
