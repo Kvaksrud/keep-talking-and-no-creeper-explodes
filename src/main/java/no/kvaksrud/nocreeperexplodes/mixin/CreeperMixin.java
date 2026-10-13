@@ -4,7 +4,7 @@ import no.kvaksrud.nocreeperexplodes.DefusableCreeper;
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.HoldStillWhileDefusingGoal;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -68,7 +68,7 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 
 	@ModifyArg(
 			method = "explodeCreeper",
-			at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerLevel;explode(Lnet/minecraft/world/entity/Entity;DDDFLnet/minecraft/world/level/Level$ExplosionInteraction;)V"),
+			at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;explode(Lnet/minecraft/world/entity/Entity;DDDFLnet/minecraft/world/level/Level$ExplosionInteraction;)Lnet/minecraft/world/level/Explosion;"),
 			index = 4)
 	private float nocreeperexplodes$failedDefuseBoom(float radius) {
 		return this.nocreeperexplodes$failedDefuse ? radius * (float) NoCreeperExplodes.config().explosionSizeMultiplier() : radius;
@@ -86,7 +86,7 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 		}
 
 		Creeper self = (Creeper) (Object) this;
-		DefuseSession session = this.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+		DefuseSession session = this.getExistingDataOrNull(NoCreeperExplodes.DEFUSE_SESSION);
 
 		if (session == null) {
 			this.nocreeperexplodes$nextBeep = 0L;
@@ -97,21 +97,21 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 			ServerPlayer defuser = NoCreeperExplodes.sessionPlayer(self, session);
 
 			if (defuser == null) {
-				this.removeAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				this.removeData(NoCreeperExplodes.DEFUSE_SESSION);
 				this.nocreeperexplodes$nextBeep = 0L;
 				return;
 			}
 
 			if (!NoCreeperExplodes.isStillNextTo(defuser, self)) {
 				this.nocreeperexplodes$walkAway(defuser);
-				session = this.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+				session = this.getExistingDataOrNull(NoCreeperExplodes.DEFUSE_SESSION);
 			}
 		}
 
 		long now = this.level().getGameTime();
 
 		if (!session.isActive(now)) {
-			this.removeAttached(NoCreeperExplodes.DEFUSE_SESSION);
+			this.removeData(NoCreeperExplodes.DEFUSE_SESSION);
 			this.nocreeperexplodes$explodeFailedDefuse();
 			ci.cancel();
 			return;
@@ -131,18 +131,18 @@ public abstract class CreeperMixin extends Monster implements DefusableCreeper {
 
 	@Override
 	public void nocreeperexplodes$walkAway(@Nullable ServerPlayer player) {
-		DefuseSession session = this.getAttached(NoCreeperExplodes.DEFUSE_SESSION);
+		DefuseSession session = this.getExistingDataOrNull(NoCreeperExplodes.DEFUSE_SESSION);
 
 		if (session == null || session.walkedAway()) {
 			return;
 		}
 
-		this.setAttached(NoCreeperExplodes.DEFUSE_SESSION, session.walkAway(this.level().getGameTime()));
+		this.setData(NoCreeperExplodes.DEFUSE_SESSION, session.walkAway(this.level().getGameTime()));
 		// Switch to the frantic beep straight away.
 		this.nocreeperexplodes$nextBeep = 0L;
 
 		if (player != null) {
-			player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.walked_away"));
+			player.displayClientMessage(Component.translatable("message.nocreeperexplodes.walked_away"), true);
 		}
 	}
 }

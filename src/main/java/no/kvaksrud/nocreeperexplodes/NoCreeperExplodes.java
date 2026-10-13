@@ -1,17 +1,19 @@
 package no.kvaksrud.nocreeperexplodes;
 
+import java.util.function.Supplier;
+
 import com.mojang.serialization.Codec;
+import no.kvaksrud.nocreeperexplodes.client.NoCreeperExplodesClient;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
 import no.kvaksrud.nocreeperexplodes.network.OpenWireCutPayload;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
@@ -24,19 +26,23 @@ import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.EntityHitResult;
 
-import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentSyncPredicate;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
-import net.fabricmc.fabric.api.event.player.UseEntityCallback;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.fabricmc.loader.api.FabricLoader;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.loading.FMLPaths;
+import net.neoforged.neoforge.attachment.AttachmentType;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.registries.DeferredHolder;
+import net.neoforged.neoforge.registries.DeferredRegister;
+import net.neoforged.neoforge.registries.NeoForgeRegistries;
 
-public class NoCreeperExplodes implements ModInitializer {
+@Mod(NoCreeperExplodes.MOD_ID)
+public class NoCreeperExplodes {
 	public static final String MOD_ID = "nocreeperexplodes";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
@@ -46,31 +52,45 @@ public class NoCreeperExplodes implements ModInitializer {
 
 	private static volatile NoCreeperExplodesConfig config = NoCreeperExplodesConfig.DEFAULTS;
 
+	private static final DeferredRegister<AttachmentType<?>> ATTACHMENT_TYPES = DeferredRegister.create(NeoForgeRegistries.Keys.ATTACHMENT_TYPES, MOD_ID);
+	private static final DeferredRegister<SoundEvent> SOUND_EVENTS = DeferredRegister.create(Registries.SOUND_EVENT, MOD_ID);
+
 	/** Saved with the creeper and synced to every client, so they can draw the tear. */
-	public static final AttachmentType<Boolean> DEFUSED = AttachmentRegistry.create(id("defused"),
-			builder -> builder.persistent(Codec.BOOL).syncWith(ByteBufCodecs.BOOL, AttachmentSyncPredicate.all()));
+	public static final Supplier<AttachmentType<Boolean>> DEFUSED = ATTACHMENT_TYPES.register("defused",
+			() -> AttachmentType.builder(() -> false).serialize(Codec.BOOL).sync((holder, player) -> hasMod(player), ByteBufCodecs.BOOL).build());
 
-	/** Server-only: never saved or synced, so the correct wire can't be read by the client. */
-	public static final AttachmentType<DefuseSession> DEFUSE_SESSION = AttachmentRegistry.create(id("defuse_session"));
+	/**
+	 * Server-only: never saved or synced, so the correct wire can't be read by the client. There is no default
+	 * session: read it with getExistingDataOrNull or hasData.
+	 */
+	public static final Supplier<AttachmentType<DefuseSession>> DEFUSE_SESSION = ATTACHMENT_TYPES.register("defuse_session",
+			() -> AttachmentType.<DefuseSession>builder(() -> {
+				throw new IllegalStateException("A defuse session is only ever set explicitly");
+			}).build());
 
-	public static final SoundEvent DEFUSE_BEEP = Registry.register(BuiltInRegistries.SOUND_EVENT, id("defuse_beep"),
-			SoundEvent.createVariableRangeEvent(id("defuse_beep")));
+	public static final DeferredHolder<SoundEvent, SoundEvent> DEFUSE_BEEP = SOUND_EVENTS.register("defuse_beep", SoundEvent::createVariableRangeEvent);
 
-	@Override
-	public void onInitialize() {
+	public NoCreeperExplodes(IEventBus modEventBus) {
 		loadConfig();
+		ATTACHMENT_TYPES.register(modEventBus);
+		SOUND_EVENTS.register(modEventBus);
+		modEventBus.addListener(NoCreeperExplodes::registerPayloads);
+
 		// Read again for every world or server start, so an edit doesn't need a game restart.
-		ServerLifecycleEvents.SERVER_STARTING.register(_ -> loadConfig());
-
-		PayloadTypeRegistry.clientboundPlay().register(OpenWireCutPayload.TYPE, OpenWireCutPayload.CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(CutWirePayload.TYPE, CutWirePayload.CODEC);
-
-		UseEntityCallback.EVENT.register(NoCreeperExplodes::onUseEntity);
-		ServerPlayNetworking.registerGlobalReceiver(CutWirePayload.TYPE, NoCreeperExplodes::onCutWire);
+		NeoForge.EVENT_BUS.addListener(ServerStartingEvent.class, event -> loadConfig());
+		NeoForge.EVENT_BUS.addListener(NoCreeperExplodes::onEntityInteract);
 	}
 
-	public static Identifier id(String path) {
-		return Identifier.fromNamespaceAndPath(MOD_ID, path);
+	private static void registerPayloads(RegisterPayloadHandlersEvent event) {
+		// Both handlers run on the main thread (the 1.21.1 default).
+		event.registrar("1")
+				// Only ever handled on the client; the lambda keeps the client class from loading on a dedicated server.
+				.playToClient(OpenWireCutPayload.TYPE, OpenWireCutPayload.CODEC, (payload, context) -> NoCreeperExplodesClient.openWireCut(payload))
+				.playToServer(CutWirePayload.TYPE, CutWirePayload.CODEC, NoCreeperExplodes::onCutWire);
+	}
+
+	public static ResourceLocation id(String path) {
+		return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
 	}
 
 	public static NoCreeperExplodesConfig config() {
@@ -83,11 +103,20 @@ public class NoCreeperExplodes implements ModInitializer {
 	}
 
 	private static void loadConfig() {
-		config = NoCreeperExplodesConfig.load(FabricLoader.getInstance().getConfigDir().resolve(NoCreeperExplodesConfig.FILE_NAME));
+		config = NoCreeperExplodesConfig.load(FMLPaths.CONFIGDIR.get().resolve(NoCreeperExplodesConfig.FILE_NAME));
+	}
+
+	/**
+	 * Whether this player's game has the mod, so it can be sent the panel and the defused flag. Fake players have
+	 * no network channel at all, and game-test players have one without the mod on the other end.
+	 */
+	public static boolean hasMod(ServerPlayer player) {
+		return player.connection != null && player.connection.getConnection().channel() != null
+				&& player.connection.hasChannel(OpenWireCutPayload.TYPE);
 	}
 
 	public static boolean isDefused(Creeper creeper) {
-		return creeper.getAttachedOrElse(DEFUSED, false);
+		return Boolean.TRUE.equals(creeper.getExistingDataOrNull(DEFUSED));
 	}
 
 	/**
@@ -95,7 +124,7 @@ public class NoCreeperExplodes implements ModInitializer {
 	 * or they have left the game or died.
 	 */
 	public static @Nullable ServerPlayer activeDefuser(Creeper creeper) {
-		DefuseSession session = creeper.getAttached(DEFUSE_SESSION);
+		DefuseSession session = creeper.getExistingDataOrNull(DEFUSE_SESSION);
 
 		if (session == null || session.walkedAway() || !session.isActive(creeper.level().getGameTime())) {
 			return null;
@@ -117,7 +146,7 @@ public class NoCreeperExplodes implements ModInitializer {
 
 	/** True while the creeper must not swell: it is defused, or a bomb timer is running on it. */
 	public static boolean isHeld(Creeper creeper) {
-		return isDefused(creeper) || creeper.hasAttached(DEFUSE_SESSION);
+		return isDefused(creeper) || creeper.hasData(DEFUSE_SESSION);
 	}
 
 	/** Blocks of empty space between two hitboxes; 0 when they touch or overlap. */
@@ -140,7 +169,16 @@ public class NoCreeperExplodes implements ModInitializer {
 		return isWithinReach(player, creeper, config.defuseDistance() + REACH_TOLERANCE);
 	}
 
-	private static InteractionResult onUseEntity(Player player, Level level, InteractionHand hand, Entity entity, @Nullable EntityHitResult hitResult) {
+	private static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+		InteractionResult result = onUseEntity(event.getEntity(), event.getHand(), event.getTarget());
+
+		if (result != InteractionResult.PASS) {
+			event.setCancellationResult(result);
+			event.setCanceled(true);
+		}
+	}
+
+	private static InteractionResult onUseEntity(Player player, InteractionHand hand, Entity entity) {
 		if (!(entity instanceof Creeper creeper) || player.isSpectator() || !creeper.isAlive()) {
 			return InteractionResult.PASS;
 		}
@@ -158,10 +196,10 @@ public class NoCreeperExplodes implements ModInitializer {
 			}
 
 			if (player instanceof ServerPlayer serverPlayer) {
-				serverPlayer.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.already_defused"));
+				serverPlayer.displayClientMessage(Component.translatable("message.nocreeperexplodes.already_defused"), true);
 			}
 
-			return InteractionResult.SUCCESS;
+			return InteractionResult.sidedSuccess(player.level().isClientSide());
 		}
 
 		if (!emptyMainHand) {
@@ -173,16 +211,16 @@ public class NoCreeperExplodes implements ModInitializer {
 		}
 
 		// On the client this swings the arm and lets the server decide.
-		return InteractionResult.SUCCESS;
+		return InteractionResult.sidedSuccess(player.level().isClientSide());
 	}
 
 	/** Starts the minigame for this player, unless someone else got there first, it's already armed, or they're too far away. */
 	public static void tryStartDefuse(ServerPlayer player, Creeper creeper) {
-		DefuseSession session = creeper.getAttached(DEFUSE_SESSION);
+		DefuseSession session = creeper.getExistingDataOrNull(DEFUSE_SESSION);
 
 		if (session != null) {
 			if (session.walkedAway()) {
-				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.armed"));
+				player.displayClientMessage(Component.translatable("message.nocreeperexplodes.armed"), true);
 				return;
 			}
 
@@ -195,7 +233,7 @@ public class NoCreeperExplodes implements ModInitializer {
 			}
 
 			if (defuser != null) {
-				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.busy"));
+				player.displayClientMessage(Component.translatable("message.nocreeperexplodes.busy"), true);
 				return;
 			}
 
@@ -206,24 +244,35 @@ public class NoCreeperExplodes implements ModInitializer {
 
 		if (!isWithinReach(player, creeper, distance)) {
 			String message = distance == 1.0 ? "message.nocreeperexplodes.too_far_one_block" : "message.nocreeperexplodes.too_far";
-			player.sendOverlayMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)));
+			player.displayClientMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)), true);
 			return;
 		}
 
-		creeper.setAttached(DEFUSE_SESSION, DefuseSession.start(player.getUUID(), creeper.level().getGameTime()));
+		creeper.setData(DEFUSE_SESSION, DefuseSession.start(player.getUUID(), creeper.level().getGameTime()));
 		creeper.setSwellDir(-1);
 		creeper.getNavigation().stop();
-		ServerPlayNetworking.send(player, new OpenWireCutPayload(creeper.getId(), distance));
+
+		if (hasMod(player)) {
+			PacketDistributor.sendToPlayer(player, new OpenWireCutPayload(creeper.getId(), distance));
+		}
 	}
 
-	private static void onCutWire(CutWirePayload payload, ServerPlayNetworking.Context context) {
-		ServerPlayer player = context.player();
+	private static void onCutWire(CutWirePayload payload, IPayloadContext context) {
+		if (context.player() instanceof ServerPlayer player && player.level().getEntity(payload.entityId()) instanceof Creeper creeper) {
+			cutWire(player, creeper, payload.wire());
+		}
+	}
 
-		if (!(player.level().getEntity(payload.entityId()) instanceof Creeper creeper) || !creeper.isAlive()) {
+	/**
+	 * What the player's panel sent: the wire they cut (0 to {@link #WIRE_COUNT} - 1), or {@link CutWirePayload#CANCEL}
+	 * when it closed early. Public so the game tests can cut wires without a client.
+	 */
+	public static void cutWire(ServerPlayer player, Creeper creeper, int wire) {
+		if (!creeper.isAlive()) {
 			return;
 		}
 
-		DefuseSession session = creeper.getAttached(DEFUSE_SESSION);
+		DefuseSession session = creeper.getExistingDataOrNull(DEFUSE_SESSION);
 
 		if (session == null || session.walkedAway() || !session.player().equals(player.getUUID())) {
 			return;
@@ -231,24 +280,24 @@ public class NoCreeperExplodes implements ModInitializer {
 
 		if (!player.isAlive()) {
 			// The panel closes when its player dies; that lets the creeper go rather than setting it off.
-			creeper.removeAttached(DEFUSE_SESSION);
+			creeper.removeData(DEFUSE_SESSION);
 			return;
 		}
 
 		if (!session.isActive(creeper.level().getGameTime())) {
 			// Too late: the timer ran out before this cut (or Esc) arrived.
-			creeper.removeAttached(DEFUSE_SESSION);
+			creeper.removeData(DEFUSE_SESSION);
 			((DefusableCreeper) creeper).nocreeperexplodes$explodeFailedDefuse();
 			return;
 		}
 
-		if (payload.wire() < 0 || payload.wire() >= WIRE_COUNT || !isStillNextTo(player, creeper)) {
+		if (wire < 0 || wire >= WIRE_COUNT || !isStillNextTo(player, creeper)) {
 			// Esc, or the panel closed because they got pushed away: they walked away from a live bomb.
 			((DefusableCreeper) creeper).nocreeperexplodes$walkAway(player);
 			return;
 		}
 
-		creeper.removeAttached(DEFUSE_SESSION);
+		creeper.removeData(DEFUSE_SESSION);
 
 		if (config.isSafeCut(creeper.getRandom().nextDouble())) {
 			defuse(creeper);
@@ -258,7 +307,7 @@ public class NoCreeperExplodes implements ModInitializer {
 	}
 
 	private static void defuse(Creeper creeper) {
-		creeper.setAttached(DEFUSED, true);
+		creeper.setData(DEFUSED, true);
 		creeper.setSwellDir(-1);
 
 		Level level = creeper.level();

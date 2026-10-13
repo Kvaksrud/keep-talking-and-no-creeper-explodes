@@ -37,14 +37,14 @@ Get the jar for your Minecraft version and mod loader from [Releases](https://gi
 - JDK 25 (`brew install openjdk@25`, then `export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home`)
 
 ## Building and running
-On the 26.x branches:
+On this branch (`neoforge/1.21.1`):
 ```bash
-./gradlew build              # build/libs/ktance-fabric-<version>+mc<mc>.jar; also runs the unit tests
+./gradlew build              # build/libs/ktance-neoforge-<version>+mc1.21.1.jar; also runs the unit tests
 ./gradlew runClient          # dev client with the mod loaded
-./gradlew runClientGameTest  # automated in-game test (opens a game window)
+./gradlew runGameTestServer  # automated in-game tests on a headless test server (no window)
 ```
 
-The 1.21.1 branches download Java 21 for Gradle on their own the first time. On those branches the in-game tests run on a headless test server: `./gradlew runGameTest` on `mc/1.21.1`, and `./gradlew runGameTestServer` on `neoforge/1.21.1`.
+The 1.21.1 branches download Java 21 for Gradle on their own the first time. On `mc/1.21.1` the in-game tests run with `./gradlew runGameTest`. On the 26.x branches it's `./gradlew runClientGameTest`, which opens a game window, and the jar is `ktance-fabric-<version>+mc<mc>.jar`.
 
 The unit tests (`./gradlew test`) cover the settings file (defaults, custom values, typos, out-of-range values, missing keys) and the bomb timer (the 3-second walk-away fuse, the beep speed). The game tests play through:
 - the settings file being written with the defaults;
@@ -58,10 +58,10 @@ The unit tests (`./gradlew test`) cover the settings file (defaults, custom valu
 - walking away with Esc, and getting pushed out of reach: frantic beeping, no way back, and a 5× blast within 3 seconds;
 - a 1× `explosion_size_multiplier` giving an ordinary creeper blast.
 
-On 26.x the client game test saves screenshots to `build/run/clientGameTest/screenshots/nce_*.png`.
+The headless test server has no sound, so on this branch the game tests don't count the beeps. On 26.x the client game test saves screenshots to `build/run/clientGameTest/screenshots/nce_*.png`.
 
 ## Releases
-`main` always targets the newest Minecraft version on Fabric, and new work happens there. Older Fabric versions live on `mc/<version>` branches, and NeoForge on `neoforge/<version>` branches (see the table above), for as long as they're supported. When a new Minecraft version comes out, branch the current `main` off as `mc/<old version>`, then update `main`. CI builds every push and pull request and runs the unit tests. On `main`, `mc/*` and `neoforge/*`, the first time it sees a new `mod_version` it does three things:
+`main` always targets the newest Minecraft version on Fabric, and new work happens there. Older Fabric versions live on `mc/<version>` branches, and NeoForge on `neoforge/<version>` branches (see the table above), for as long as they're supported. When a new Minecraft version comes out, branch the current `main` off as `mc/<old version>`, then update `main`. CI builds every push and pull request and runs the unit tests (on this branch, the game tests too). On `main`, `mc/*` and `neoforge/*`, the first time it sees a new `mod_version` it does three things:
 - tags the commit `v<mod_version>+mc<minecraft_version>` (with `-neoforge` on the end for NeoForge);
 - creates a GitHub release with the jar;
 - lists the Minecraft, mod loader and Java versions in the release notes.

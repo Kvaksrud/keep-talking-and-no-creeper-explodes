@@ -20,7 +20,7 @@ public class HoldStillWhileDefusingGoal extends Goal {
 
 	@Override
 	public boolean canUse() {
-		return this.creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION);
+		return this.creeper.hasData(NoCreeperExplodes.DEFUSE_SESSION);
 	}
 
 	@Override

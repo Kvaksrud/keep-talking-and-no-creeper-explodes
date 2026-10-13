@@ -1,0 +1,30 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="CC0-1.0"
+
+[[mods]]
+modId="nocreeperexplodes"
+version="${version}"
+displayName="Keep Talking and No Creeper Explodes"
+logoFile="assets/nocreeperexplodes/icon.png"
+authors="Patrick"
+description='''
+Right-click a creeper to try defusing it: cut the right wire out of three and it can never explode again (it is sad about it). Cut the wrong one and... well.
+'''
+
+[[mixins]]
+config="nocreeperexplodes.mixins.json"
+
+[[dependencies.nocreeperexplodes]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.nocreeperexplodes]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"
