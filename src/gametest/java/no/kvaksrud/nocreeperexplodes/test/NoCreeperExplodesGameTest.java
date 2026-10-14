@@ -2,6 +2,7 @@ package no.kvaksrud.nocreeperexplodes.test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
@@ -61,6 +62,41 @@ public class NoCreeperExplodesGameTest {
 	private static final Vec3 MIDDLE = new Vec3(8.5, 2.0, 8.5);
 	/** Next to a creeper in the middle: 0.4 blocks of empty space between them. */
 	private static final Vec3 NEXT_TO_MIDDLE = MIDDLE.add(0.0, 0.0, 1.0);
+
+	@GameTest(template = ARENA)
+	public static void defuseToolsWorkLikeAnEmptyHand(GameTestHelper helper) {
+		Creeper creeper = creeper(helper, MIDDLE, false);
+		ServerPlayer player = player(helper, NEXT_TO_MIDDLE);
+
+		// A stick isn't on the default list: nothing starts.
+		player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
+		rightClick(player, creeper);
+		helper.assertTrue(!creeper.hasData(NoCreeperExplodes.DEFUSE_SESSION), "A stick isn't on the default defuse_tools list");
+
+		// A shovel is (#minecraft:shovels).
+		player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_SHOVEL));
+		rightClick(player, creeper);
+		helper.assertTrue(creeper.hasData(NoCreeperExplodes.DEFUSE_SESSION), "A shovel is on the default defuse_tools list");
+		creeper.removeData(NoCreeperExplodes.DEFUSE_SESSION);
+
+		// The list is a setting: with only a stick on it, the shovel does nothing and the stick works. All within this
+		// tick, so the tests running alongside never see the changed setting.
+		NoCreeperExplodes.setConfig(new NoCreeperExplodesConfig(DEFAULTS.defuseDistance(), DEFAULTS.successChancePercent(), DEFAULTS.explosionSizeMultiplier(), List.of("minecraft:stick")));
+
+		try {
+			rightClick(player, creeper);
+			helper.assertTrue(!creeper.hasData(NoCreeperExplodes.DEFUSE_SESSION), "A shovel isn't on a defuse_tools list of just minecraft:stick");
+			player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
+			rightClick(player, creeper);
+			helper.assertTrue(creeper.hasData(NoCreeperExplodes.DEFUSE_SESSION), "A stick on the defuse_tools list should start defusing");
+		} finally {
+			NoCreeperExplodes.setConfig(DEFAULTS);
+			creeper.discard();
+			leave(helper, player);
+		}
+
+		helper.succeed();
+	}
 
 	@GameTest(template = ARENA)
 	public static void settingsFileHoldsTheDefaults(GameTestHelper helper) {

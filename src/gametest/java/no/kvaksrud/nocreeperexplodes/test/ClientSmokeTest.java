@@ -36,9 +36,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Difficulty;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
@@ -57,7 +60,7 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 /**
  * Plays through the client side in a real game window (./gradlew runClientSmokeTest): a fresh flat creative world,
  * the settings file, opening the panel with a right-click, a safe cut and the tear it leaves (seen by the client
- * through the attachment sync), the beeps, walking away with Esc, and getting out of reach. Screenshots land in
+ * through the attachment sync, opened while holding a shovel from the defuse_tools list), the beeps, walking away with Esc, and getting out of reach. Screenshots land in
  * build/run/clientSmokeTest/screenshots (prefixed nce_). The game exits with 0 when everything passed, 1 otherwise.
  *
  * <p>Does nothing unless the nocreeperexplodes.clientSmokeTest system property is set. The steps run on their own
@@ -163,6 +166,8 @@ public final class ClientSmokeTest {
 		// 3. A right-click through the client's use key opens the panel.
 		LOGGER.info("Smoke test: opening the panel");
 		int lucky = spawnCreeperInFront(minecraft, server, playerId, start);
+		// With a shovel in hand: it's on the default defuse_tools list, so it works like an empty hand.
+		holdInMainHand(minecraft, server, playerId, new ItemStack(Items.DIAMOND_SHOVEL));
 		openPanel(minecraft, lucky);
 		check(server(server, () -> session(server, lucky) != null), "The right-click should start a defuse session on the server");
 		screenshot(minecraft, "01_wire_panel");
@@ -188,6 +193,7 @@ public final class ClientSmokeTest {
 		check(client(() -> minecraft.screen instanceof WireCutScreen), "The panel should show that it's defused for a moment");
 		screenshot(minecraft, "02_defused_panel");
 		waitFor("the panel to close after defusing", 60, () -> client(() -> minecraft.screen == null));
+		holdInMainHand(minecraft, server, playerId, ItemStack.EMPTY);
 		onClient(() -> {
 			minecraft.options.hideGui = true;
 			Entity creeper = minecraft.level.getEntity(lucky);
@@ -290,6 +296,12 @@ public final class ClientSmokeTest {
 				() -> client(() -> minecraft.level.getEntity(id) instanceof Creeper && minecraft.player.position().distanceTo(at) < 0.01));
 		waitTicks(5);
 		return id;
+	}
+
+	/** Puts this in the player's main hand on the server, then waits until the client's inventory shows it too. */
+	private static void holdInMainHand(Minecraft minecraft, IntegratedServer server, UUID playerId, ItemStack stack) throws InterruptedException {
+		onServer(server, () -> server.getPlayerList().getPlayer(playerId).setItemInHand(InteractionHand.MAIN_HAND, stack.copy()));
+		waitFor("the client to see the item in hand", 40, () -> client(() -> ItemStack.matches(minecraft.player.getMainHandItem(), stack)));
 	}
 
 	/** Aims at the creeper and presses the use key, as a player would. */
