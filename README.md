@@ -69,7 +69,7 @@ The headless test server has no sound, so on this branch the game tests don't co
 - creates a GitHub release with the jar;
 - lists the Minecraft, mod loader and Java versions in the release notes.
 
-To release, bump `mod_version` in `gradle.properties` and push the branch. Port gameplay changes to the other version branches with `git cherry-pick` (the 1.21.1 branches need hand-porting, since the APIs differ).
+To release, add the new version to `CHANGELOG.md` (CI puts its section in the release notes), bump `mod_version` in `gradle.properties`, and push the branch. Port gameplay changes to the other version branches with `git cherry-pick` (the 1.21.1 branches need hand-porting, since the APIs differ).
 
 ## Art and sound
 - **Textures:** `tools/gen_textures.py` draws every texture using only the Python standard library. After changing it, run `python3 tools/gen_textures.py` to rewrite the PNGs in `src/main/resources/assets/nocreeperexplodes/`. It also writes enlarged previews to `build/texture-preview/`. The wire layout constants in `WireCutScreen` mirror the ones in the script.
