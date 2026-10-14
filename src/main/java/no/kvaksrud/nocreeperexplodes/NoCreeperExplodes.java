@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.resources.Identifier;
@@ -17,11 +18,13 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
@@ -140,12 +143,33 @@ public class NoCreeperExplodes implements ModInitializer {
 		return isWithinReach(player, creeper, config.defuseDistance() + REACH_TOLERANCE);
 	}
 
+	/**
+	 * An empty hand, or an item on the defuse_tools list (by id or #tag), can start cutting a creeper's wires. A client
+	 * checks its own settings file, which only decides whether the arm swings; the server's list is the one that counts.
+	 */
+	public static boolean canDefuseWith(ItemStack stack) {
+		if (stack.isEmpty()) {
+			return true;
+		}
+
+		for (String entry : config.defuseTools()) {
+			boolean isTag = entry.startsWith("#");
+			Identifier id = Identifier.tryParse(isTag ? entry.substring(1) : entry);
+
+			if (id != null && (isTag ? stack.is(TagKey.create(Registries.ITEM, id)) : BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(id))) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static InteractionResult onUseEntity(Player player, Level level, InteractionHand hand, Entity entity, @Nullable EntityHitResult hitResult) {
 		if (!(entity instanceof Creeper creeper) || player.isSpectator() || !creeper.isAlive()) {
 			return InteractionResult.PASS;
 		}
 
-		boolean emptyMainHand = hand == InteractionHand.MAIN_HAND && player.getMainHandItem().isEmpty();
+		boolean defuseHand = hand == InteractionHand.MAIN_HAND && canDefuseWith(player.getMainHandItem());
 
 		if (isDefused(creeper)) {
 			if (player.getItemInHand(hand).is(ItemTags.CREEPER_IGNITERS)) {
@@ -153,7 +177,7 @@ public class NoCreeperExplodes implements ModInitializer {
 				return InteractionResult.FAIL;
 			}
 
-			if (!emptyMainHand) {
+			if (!defuseHand) {
 				return InteractionResult.PASS;
 			}
 
@@ -164,7 +188,7 @@ public class NoCreeperExplodes implements ModInitializer {
 			return InteractionResult.SUCCESS;
 		}
 
-		if (!emptyMainHand) {
+		if (!defuseHand) {
 			return InteractionResult.PASS;
 		}
 

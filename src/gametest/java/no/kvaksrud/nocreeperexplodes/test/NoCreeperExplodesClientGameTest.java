@@ -2,6 +2,7 @@ package no.kvaksrud.nocreeperexplodes.test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -124,6 +125,24 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 				check(abandoned.isAlive() && !NoCreeperExplodes.isHeld(abandoned), "A released creeper is an ordinary creeper again");
 				abandoned.discard();
 			});
+
+			// Tools from the defuse_tools list work like an empty hand; anything else does nothing.
+			Creeper tooled = spawnCreeperFacingPlayer(singleplayer, 1, 0, true);
+			holdInMainHand(context, singleplayer, new ItemStack(Items.STICK));
+			rightClickDoesNothing(context, singleplayer, tooled, "A stick isn't on the default defuse_tools list");
+			holdInMainHand(context, singleplayer, new ItemStack(Items.DIAMOND_SHOVEL));
+			openPanel(context, singleplayer, tooled);
+			removeAndClosePanel(context, singleplayer, tooled);
+
+			// The list is a setting: here only a stick is allowed, so the shovel no longer is.
+			NoCreeperExplodes.setConfig(new NoCreeperExplodesConfig(DEFAULTS.defuseDistance(), DEFAULTS.successChancePercent(), DEFAULTS.explosionSizeMultiplier(), List.of("minecraft:stick")));
+			Creeper sticky = spawnCreeperFacingPlayer(singleplayer, 1, 0, true);
+			rightClickDoesNothing(context, singleplayer, sticky, "A shovel isn't on a defuse_tools list of just minecraft:stick");
+			holdInMainHand(context, singleplayer, new ItemStack(Items.STICK));
+			openPanel(context, singleplayer, sticky);
+			removeAndClosePanel(context, singleplayer, sticky);
+			NoCreeperExplodes.setConfig(DEFAULTS);
+			holdInMainHand(context, singleplayer, ItemStack.EMPTY);
 
 			// With a 100% chance any wire defuses it.
 			NoCreeperExplodes.setConfig(ALWAYS_SAFE);
@@ -348,6 +367,21 @@ public class NoCreeperExplodesClientGameTest implements FabricClientGameTest {
 		});
 		singleplayer.getConnection().waitForClientboundEntityUpdates(EntityTypes.CREEPER);
 		return creeper;
+	}
+
+	/** Puts this in the player's main hand and gives the inventory sync a moment to reach the client. */
+	private static void holdInMainHand(ClientGameTestContext context, TestSingleplayerContext singleplayer, ItemStack stack) {
+		singleplayer.getServer().runOnServer(_ -> singleplayer.getConnection().getServerPlayer().setItemInHand(InteractionHand.MAIN_HAND, stack.copy()));
+		context.waitTicks(5);
+	}
+
+	/** A right-click on the creeper with what's in hand opens no panel and starts no bomb timer. */
+	private static void rightClickDoesNothing(ClientGameTestContext context, TestSingleplayerContext singleplayer, Creeper creeper, String why) {
+		lookAt(context, creeper);
+		context.getInput().pressKey(options -> options.keyUse);
+		context.waitTicks(5);
+		check(context.computeOnClient(client -> client.gui.screen() == null), why + ": no panel should open");
+		check(!singleplayer.getServer().computeOnServer(_ -> creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION)), why + ": no bomb timer should start");
 	}
 
 	private static void lookAt(ClientGameTestContext context, Creeper creeper) {
