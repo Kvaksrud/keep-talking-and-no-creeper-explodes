@@ -86,6 +86,12 @@ jobs:
           **Install:** put \`$(basename "$JAR")\`${INSTALL_EXTRA} in your \`mods\` folder.
           EOF
 
+          # What changed: this version's section of CHANGELOG.md.
+          CHANGES=$(awk -v heading="## ${MOD_VERSION}" '$0 == heading {found = 1; next} found && /^## / {exit} found' CHANGELOG.md)
+          if [ -n "$CHANGES" ]; then
+            printf '\n## Changes\n%s\n' "$CHANGES" >> notes.md
+          fi
+
           gh release create "$TAG" "$JAR" \
             --target "$GITHUB_SHA" \
             --latest="$LATEST" \
