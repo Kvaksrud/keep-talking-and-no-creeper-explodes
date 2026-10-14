@@ -25,7 +25,11 @@ jobs:
       - name: setup jdk
         uses: actions/setup-java@v5
         with:
-          java-version: ${{ steps.props.outputs.java }}
+          # Both, with 25 last so Gradle runs on it: Loom 1.18 needs Java 25. The mod itself is compiled, tested and
+          # run on java_version through the Gradle toolchain.
+          java-version: |
+            ${{ steps.props.outputs.java }}
+            25
           distribution: 'microsoft'
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew
