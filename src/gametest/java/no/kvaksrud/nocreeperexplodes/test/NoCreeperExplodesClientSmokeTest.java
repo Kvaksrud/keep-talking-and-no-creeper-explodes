@@ -38,8 +38,11 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Difficulty;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
@@ -136,8 +139,9 @@ public class NoCreeperExplodesClientSmokeTest implements ClientModInitializer {
 		check(NoCreeperExplodesConfig.load(configFile).equals(DEFAULTS), "Expected the settings file to hold the defaults");
 		check(NoCreeperExplodes.config().equals(DEFAULTS), "Expected the default settings, got " + NoCreeperExplodes.config());
 
-		this.step("Right-clicking a creeper opens the bomb panel");
+		this.step("Right-clicking a creeper with a shovel (on the defuse_tools list) opens the bomb panel");
 		Creeper lucky = this.spawnCreeperInFront(playerId, 0);
+		this.holdInMainHand(playerId, new ItemStack(Items.DIAMOND_SHOVEL));
 		this.rightClick(lucky.getId());
 		this.waitFor("the bomb panel to open", 40, () -> this.client.screen instanceof WireCutScreen);
 		check(this.onServer(server -> lucky.hasAttached(NoCreeperExplodes.DEFUSE_SESSION)), "Right-click should start a defuse session on the server");
@@ -158,6 +162,7 @@ public class NoCreeperExplodesClientSmokeTest implements ClientModInitializer {
 		check(this.onClient(() -> this.client.screen instanceof WireCutScreen), "The panel should stay up a moment to say the creeper is defused");
 		this.screenshot("nce_02_defused_panel");
 		this.waitFor("the panel to close after defusing", 60, () -> this.client.screen == null);
+		this.holdInMainHand(playerId, ItemStack.EMPTY);
 		this.runOnClient(() -> {
 			this.client.options.hideGui = true;
 			this.client.player.lookAt(EntityAnchorArgument.Anchor.EYES, this.creeperOnClient(lucky.getId()).position().add(0.0, 1.35, 0.0));
@@ -316,6 +321,15 @@ public class NoCreeperExplodesClientSmokeTest implements ClientModInitializer {
 
 	private <T> T onClient(Supplier<T> task) {
 		return join(this.client.submit(task), "the client thread");
+	}
+
+	/** Puts this in the player's main hand on the server, then waits until the client's inventory shows it too. */
+	private void holdInMainHand(UUID playerId, ItemStack stack) {
+		this.onServer(server -> {
+			server.getPlayerList().getPlayer(playerId).setItemInHand(InteractionHand.MAIN_HAND, stack.copy());
+			return null;
+		});
+		this.waitFor("the client to see the item in hand", 40, () -> ItemStack.matches(this.client.player.getMainHandItem(), stack));
 	}
 
 	private <T> T onServer(Function<MinecraftServer, T> task) {

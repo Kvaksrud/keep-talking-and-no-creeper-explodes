@@ -2,6 +2,7 @@ package no.kvaksrud.nocreeperexplodes.test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
@@ -87,6 +88,40 @@ public class NoCreeperExplodesGameTest implements FabricGameTest {
 					NoCreeperExplodes.setConfig(DEFAULTS);
 				})
 				.thenSucceed();
+	}
+
+	@GameTest(template = EMPTY_STRUCTURE)
+	public void defuseToolsWorkLikeAnEmptyHand(GameTestHelper helper) {
+		Creeper creeper = spawnCreeper(helper, true);
+		ServerPlayer player = spawnPlayer(helper, 0, -1);
+
+		// A stick isn't on the default list: nothing starts.
+		player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
+		rightClick(player, creeper);
+		check(!creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A stick isn't on the default defuse_tools list");
+
+		// A shovel is (#minecraft:shovels).
+		player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.DIAMOND_SHOVEL));
+		rightClick(player, creeper);
+		check(creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A shovel is on the default defuse_tools list");
+		creeper.removeAttached(NoCreeperExplodes.DEFUSE_SESSION);
+
+		// The list is a setting: with only a stick on it, the shovel does nothing and the stick works. All within this
+		// tick, so the tests running alongside never see the changed setting.
+		NoCreeperExplodes.setConfig(new NoCreeperExplodesConfig(DEFAULTS.defuseDistance(), DEFAULTS.successChancePercent(), DEFAULTS.explosionSizeMultiplier(), List.of("minecraft:stick")));
+
+		try {
+			rightClick(player, creeper);
+			check(!creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A shovel isn't on a defuse_tools list of just minecraft:stick");
+			player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
+			rightClick(player, creeper);
+			check(creeper.hasAttached(NoCreeperExplodes.DEFUSE_SESSION), "A stick on the defuse_tools list should start defusing");
+		} finally {
+			NoCreeperExplodes.setConfig(DEFAULTS);
+			creeper.discard();
+		}
+
+		helper.succeed();
 	}
 
 	@GameTest(template = EMPTY_STRUCTURE)
