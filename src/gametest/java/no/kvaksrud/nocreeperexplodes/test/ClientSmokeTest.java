@@ -2,6 +2,7 @@ package no.kvaksrud.nocreeperexplodes.test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -15,8 +16,8 @@ import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodesConfig;
 import no.kvaksrud.nocreeperexplodes.client.WireCutScreen;
-import org.jetbrains.annotations.Nullable;
 import org.joml.Vector2i;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,24 +25,30 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.client.sounds.SoundEventListener;
 import net.minecraft.client.tutorial.TutorialSteps;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Difficulty;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.Relative;
 import net.minecraft.world.entity.monster.Creeper;
-import net.minecraft.world.level.GameRules;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.WorldDataConfiguration;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
@@ -57,7 +64,8 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 /**
  * Plays through the client side in a real game window (./gradlew runClientSmokeTest): a fresh flat creative world,
  * the settings file, opening the panel with a right-click, a safe cut and the tear it leaves (seen by the client
- * through the attachment sync), the beeps, walking away with Esc, and getting out of reach. Screenshots land in
+ * through the attachment sync, opened while holding a shovel from the defuse_tools list), the defused flag surviving a save and reload, the beeps, walking away with Esc, and
+ * getting out of reach. Screenshots land in
  * build/run/clientSmokeTest/screenshots (prefixed nce_). The game exits with 0 when everything passed, 1 otherwise.
  *
  * <p>Does nothing unless the nocreeperexplodes.clientSmokeTest system property is set. The steps run on their own
@@ -78,7 +86,7 @@ public final class ClientSmokeTest {
 	private static final AtomicLong clientTicks = new AtomicLong();
 	private static final AtomicInteger beeps = new AtomicInteger();
 	private static final SoundEventListener BEEP_COUNTER = (sound, sounds, range) -> {
-		if (sound.getLocation().equals(NoCreeperExplodes.DEFUSE_BEEP.getId())) {
+		if (sound.getIdentifier().equals(NoCreeperExplodes.DEFUSE_BEEP.getId())) {
 			beeps.incrementAndGet();
 		}
 	};
@@ -128,8 +136,9 @@ public final class ClientSmokeTest {
 	}
 
 	private static void playThrough(Minecraft minecraft) throws InterruptedException {
-		waitFor("the title screen", 20 * 60 * 5, () -> client(() -> minecraft.getOverlay() == null
-				&& (minecraft.screen instanceof TitleScreen || minecraft.screen instanceof AccessibilityOnboardingScreen)));
+		LOGGER.info("Smoke test: started, waiting for the title screen");
+		waitFor("the title screen", 20 * 60 * 5, () -> client(() -> minecraft.gui.overlay() == null
+				&& (minecraft.gui.screen() instanceof TitleScreen || minecraft.gui.screen() instanceof AccessibilityOnboardingScreen)));
 		onClient(() -> {
 			// The test window is often not in front, and a pause menu would stop the integrated server.
 			minecraft.options.pauseOnLostFocus = false;
@@ -143,9 +152,17 @@ public final class ClientSmokeTest {
 		LOGGER.info("Smoke test: creating a world");
 		minecraft.execute(() -> createWorld(minecraft));
 		waitFor("the world to load", 20 * 60 * 2, () -> client(() -> minecraft.level != null && minecraft.player != null
-				&& minecraft.screen == null && minecraft.getSingleplayerServer() != null));
+				&& minecraft.gui.screen() == null && minecraft.getSingleplayerServer() != null));
 		waitTicks(40);
 		IntegratedServer server = client(minecraft::getSingleplayerServer);
+		onServer(server, () -> {
+			// Calm, bright and empty: no mob spawning, no day cycle, no weather.
+			GameRules rules = server.getGameRules();
+			rules.set(GameRules.SPAWN_MOBS, false, server);
+			rules.set(GameRules.ADVANCE_TIME, false, server);
+			rules.set(GameRules.ADVANCE_WEATHER, false, server);
+			server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), "time set noon");
+		});
 		UUID playerId = client(() -> minecraft.player.getUUID());
 
 		// 2. The settings file was written with the defaults.
@@ -156,13 +173,14 @@ public final class ClientSmokeTest {
 
 		Vec3 start = server(server, () -> {
 			ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-			player.serverLevel().setDayTime(6000);
 			return new Vec3(Mth.floor(player.getX()) + 0.5, player.getY(), Mth.floor(player.getZ()) + 0.5);
 		});
 
 		// 3. A right-click through the client's use key opens the panel.
 		LOGGER.info("Smoke test: opening the panel");
 		int lucky = spawnCreeperInFront(minecraft, server, playerId, start);
+		// With a shovel in hand: it's on the default defuse_tools list, so it works like an empty hand.
+		holdInMainHand(minecraft, server, playerId, new ItemStack(Items.DIAMOND_SHOVEL));
 		openPanel(minecraft, lucky);
 		check(server(server, () -> session(server, lucky) != null), "The right-click should start a defuse session on the server");
 		screenshot(minecraft, "01_wire_panel");
@@ -173,9 +191,10 @@ public final class ClientSmokeTest {
 
 		try {
 			onClient(() -> {
-				WireCutScreen panel = (WireCutScreen) minecraft.screen;
+				WireCutScreen panel = (WireCutScreen) minecraft.gui.screen();
 				Vector2i wire = panel.wireCenter(1);
-				check(panel.mouseClicked(wire.x, wire.y, InputConstants.MOUSE_BUTTON_LEFT), "Clicking the middle wire should cut it");
+				MouseButtonEvent click = new MouseButtonEvent(wire.x, wire.y, new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0));
+				check(panel.mouseClicked(click, false), "Clicking the middle wire should cut it");
 			});
 			waitFor("the client to see the creeper defused", 40,
 					() -> client(() -> minecraft.level.getEntity(lucky) instanceof Creeper creeper && NoCreeperExplodes.isDefused(creeper)));
@@ -185,16 +204,39 @@ public final class ClientSmokeTest {
 
 		check(server(server, () -> server.overworld().getEntity(lucky) instanceof Creeper creeper && creeper.isAlive() && NoCreeperExplodes.isDefused(creeper)),
 				"The server should have the creeper defused");
-		check(client(() -> minecraft.screen instanceof WireCutScreen), "The panel should show that it's defused for a moment");
+		check(client(() -> minecraft.gui.screen() instanceof WireCutScreen), "The panel should show that it's defused for a moment");
 		screenshot(minecraft, "02_defused_panel");
-		waitFor("the panel to close after defusing", 60, () -> client(() -> minecraft.screen == null));
+		waitFor("the panel to close after defusing", 60, () -> client(() -> minecraft.gui.screen() == null));
+		holdInMainHand(minecraft, server, playerId, ItemStack.EMPTY);
 		onClient(() -> {
-			minecraft.options.hideGui = true;
+			setHudHidden(minecraft, true);
 			Entity creeper = minecraft.level.getEntity(lucky);
 			minecraft.player.lookAt(EntityAnchorArgument.Anchor.EYES, new Vec3(creeper.getX(), creeper.getY() + 1.45, creeper.getZ()));
 		});
 		screenshot(minecraft, "03_tear_close_up");
-		onClient(() -> minecraft.options.hideGui = false);
+		onClient(() -> setHudHidden(minecraft, false));
+
+		// 4b. The defused flag is saved with the creeper: leave the world, open it again, and it's still defused,
+		// on the server and (through the attachment sync) on the client.
+		LOGGER.info("Smoke test: saving and reloading");
+		UUID luckyId = server(server, () -> server.overworld().getEntity(lucky).getUUID());
+		leaveWorld(minecraft);
+		minecraft.execute(() -> minecraft.createWorldOpenFlows().openWorld(WORLD_NAME, () -> minecraft.gui.setScreen(new TitleScreen())));
+		waitFor("the world to load again", 20 * 60 * 2, () -> client(() -> minecraft.level != null && minecraft.player != null
+				&& minecraft.gui.screen() == null && minecraft.getSingleplayerServer() != null));
+		IntegratedServer reloaded = client(minecraft::getSingleplayerServer);
+		waitFor("the defused creeper to be back on the server", 20 * 10,
+				() -> server(reloaded, () -> reloaded.overworld().getEntity(luckyId) instanceof Creeper creeper && NoCreeperExplodes.isDefused(creeper)));
+		waitFor("the client to see it defused after the reload", 20 * 10,
+				() -> client(() -> minecraft.level.getEntity(luckyId) instanceof Creeper creeper && NoCreeperExplodes.isDefused(creeper)));
+		onServer(reloaded, () -> reloaded.getCommands().performPrefixedCommand(reloaded.createCommandSourceStack(), "time set noon"));
+		screenshot(minecraft, "03b_tear_after_reload");
+
+		walkAway(minecraft, reloaded, playerId, start);
+	}
+
+	/** Steps 5 to 7, in the reloaded world. */
+	private static void walkAway(Minecraft minecraft, IntegratedServer server, UUID playerId, Vec3 start) throws InterruptedException {
 
 		// 5. The bomb beeps; Esc walks away from it, and then it beeps frantically and goes off within 3 seconds.
 		LOGGER.info("Smoke test: walking away with Esc");
@@ -205,10 +247,10 @@ public final class ClientSmokeTest {
 		int timerBeeps = beeps.get();
 		LOGGER.info("Smoke test: {} beeps in the first 2 seconds", timerBeeps);
 		check(timerBeeps >= 2, "Expected the bomb to beep at least twice in 2 seconds, heard " + timerBeeps);
-		onClient(() -> check(minecraft.screen.keyPressed(InputConstants.KEY_ESCAPE, 0, 0), "Esc should close the panel"));
+		onClient(() -> check(minecraft.gui.screen().keyPressed(new KeyEvent(InputConstants.KEY_ESCAPE, 0, 0)), "Esc should close the panel"));
 		long escAt = clientTicks.get();
 		beeps.set(0);
-		waitFor("the panel to close on Esc", 5, () -> client(() -> minecraft.screen == null));
+		waitFor("the panel to close on Esc", 5, () -> client(() -> minecraft.gui.screen() == null));
 		waitFor("the server to see the walk-away", 10, () -> server(server, () -> {
 			DefuseSession session = session(server, leftBehind);
 			return session != null && session.walkedAway();
@@ -232,9 +274,9 @@ public final class ClientSmokeTest {
 		openPanel(minecraft, pushedOff);
 		onServer(server, () -> {
 			ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-			player.teleportTo(player.serverLevel(), third.x, third.y, third.z - 3.0, 0.0F, 0.0F);
+			player.teleportTo(player.level(), third.x, third.y, third.z - 3.0, Set.<Relative>of(), 0.0F, 0.0F, true);
 		});
-		waitFor("the panel to close out of reach", 20, () -> client(() -> minecraft.screen == null));
+		waitFor("the panel to close out of reach", 20, () -> client(() -> minecraft.gui.screen() == null));
 		waitFor("the server to see the walk-away", 10, () -> server(server, () -> {
 			DefuseSession session = session(server, pushedOff);
 			return session != null && session.walkedAway();
@@ -245,27 +287,32 @@ public final class ClientSmokeTest {
 
 		// 7. Leave the world the way the pause menu does.
 		LOGGER.info("Smoke test: leaving the world");
-		onClient(() -> {
-			minecraft.getSoundManager().removeListener(BEEP_COUNTER);
-			minecraft.level.disconnect();
-			minecraft.disconnect(new GenericMessageScreen(Component.translatable("menu.savingLevel")));
-			minecraft.setScreen(new TitleScreen());
-		});
-		waitFor("the title screen after leaving", 20 * 30, () -> client(() -> minecraft.level == null && minecraft.screen instanceof TitleScreen));
+		onClient(() -> minecraft.getSoundManager().removeListener(BEEP_COUNTER));
+		leaveWorld(minecraft);
 		// Let the screenshot writer finish.
 		waitTicks(20);
 	}
 
 	private static void createWorld(Minecraft minecraft) {
-		GameRules rules = new GameRules();
-		rules.getRule(GameRules.RULE_DOMOBSPAWNING).set(false, null);
-		rules.getRule(GameRules.RULE_DAYLIGHT).set(false, null);
-		rules.getRule(GameRules.RULE_WEATHER_CYCLE).set(false, null);
-		// Easy, not peaceful: peaceful removes creepers.
-		LevelSettings settings = new LevelSettings(WORLD_NAME, GameType.CREATIVE, false, Difficulty.EASY, true, rules, WorldDataConfiguration.DEFAULT);
+		// Easy, not peaceful: peaceful removes creepers. The game rules are set once the world is running.
+		LevelSettings settings = new LevelSettings(WORLD_NAME, GameType.CREATIVE, new LevelSettings.DifficultySettings(Difficulty.EASY, false, false),
+				true, WorldDataConfiguration.DEFAULT);
 		minecraft.createWorldOpenFlows().createFreshLevel(WORLD_NAME, settings, new WorldOptions(0L, false, false),
-				registries -> registries.registryOrThrow(Registries.WORLD_PRESET).getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
+				registries -> registries.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
 				new TitleScreen());
+	}
+
+	/** Leaves the world the way the pause menu's button does, and waits for the title screen. */
+	private static void leaveWorld(Minecraft minecraft) throws InterruptedException {
+		onClient(() -> minecraft.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+		waitFor("the title screen after leaving", 20 * 30, () -> client(() -> minecraft.level == null && minecraft.gui.screen() instanceof TitleScreen));
+	}
+
+	/** F1: hides the hotbar, crosshair and hand, for a clean close-up. */
+	private static void setHudHidden(Minecraft minecraft, boolean hidden) {
+		if (minecraft.gui.hud.isHidden() != hidden) {
+			minecraft.gui.hud.toggle();
+		}
 	}
 
 	/**
@@ -275,10 +322,10 @@ public final class ClientSmokeTest {
 	private static int spawnCreeperInFront(Minecraft minecraft, IntegratedServer server, UUID playerId, Vec3 at) throws InterruptedException {
 		int id = server(server, () -> {
 			ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-			ServerLevel level = player.serverLevel();
-			player.teleportTo(level, at.x, at.y, at.z, 0.0F, 0.0F);
-			Creeper creeper = new Creeper(EntityType.CREEPER, level);
-			creeper.moveTo(at.x, at.y, at.z + 1.0, 180.0F, 0.0F);
+			ServerLevel level = player.level();
+			player.teleportTo(level, at.x, at.y, at.z, Set.<Relative>of(), 0.0F, 0.0F, true);
+			Creeper creeper = new Creeper(EntityTypes.CREEPER, level);
+			creeper.snapTo(at.x, at.y, at.z + 1.0, 180.0F, 0.0F);
 			creeper.setYHeadRot(180.0F);
 			creeper.setYBodyRot(180.0F);
 			creeper.setNoAi(true);
@@ -292,13 +339,19 @@ public final class ClientSmokeTest {
 		return id;
 	}
 
+	/** Puts this in the player's main hand on the server, then waits until the client's inventory shows it too. */
+	private static void holdInMainHand(Minecraft minecraft, IntegratedServer server, UUID playerId, ItemStack stack) throws InterruptedException {
+		onServer(server, () -> server.getPlayerList().getPlayer(playerId).setItemInHand(InteractionHand.MAIN_HAND, stack.copy()));
+		waitFor("the client to see the item in hand", 40, () -> client(() -> ItemStack.matches(minecraft.player.getMainHandItem(), stack)));
+	}
+
 	/** Aims at the creeper and presses the use key, as a player would. */
 	private static void openPanel(Minecraft minecraft, int creeperId) throws InterruptedException {
 		onClient(() -> minecraft.player.lookAt(EntityAnchorArgument.Anchor.EYES, minecraft.level.getEntity(creeperId).getBoundingBox().getCenter()));
 		waitFor("the crosshair on the creeper", 20,
 				() -> client(() -> minecraft.hitResult instanceof EntityHitResult hit && hit.getEntity().getId() == creeperId));
 		onClient(() -> KeyMapping.click(minecraft.options.keyUse.getKey()));
-		waitFor("the wire panel", 40, () -> client(() -> minecraft.screen instanceof WireCutScreen));
+		waitFor("the wire panel", 40, () -> client(() -> minecraft.gui.screen() instanceof WireCutScreen));
 	}
 
 	private static @Nullable DefuseSession session(IntegratedServer server, int creeperId) {
@@ -306,10 +359,10 @@ public final class ClientSmokeTest {
 	}
 
 	private static void screenshot(Minecraft minecraft, String name) throws InterruptedException {
-		onClient(() -> minecraft.getToasts().clear());
+		onClient(() -> minecraft.gui.toastManager().clear());
 		// A couple of frames, so the picture shows what the game shows now.
 		waitTicks(3);
-		onClient(() -> Screenshot.grab(minecraft.gameDirectory, "nce_" + name + ".png", minecraft.getMainRenderTarget(),
+		onClient(() -> Screenshot.grab(minecraft.gameDirectory, "nce_" + name + ".png", minecraft.gameRenderer.mainRenderTarget(), 1,
 				message -> LOGGER.info("Smoke test: {}", message.getString())));
 	}
 

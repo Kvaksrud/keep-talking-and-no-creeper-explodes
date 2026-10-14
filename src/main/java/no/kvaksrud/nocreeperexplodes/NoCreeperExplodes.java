@@ -6,24 +6,27 @@ import com.mojang.serialization.Codec;
 import no.kvaksrud.nocreeperexplodes.client.NoCreeperExplodesClient;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
 import no.kvaksrud.nocreeperexplodes.network.OpenWireCutPayload;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 
@@ -57,7 +60,7 @@ public class NoCreeperExplodes {
 
 	/** Saved with the creeper and synced to every client, so they can draw the tear. */
 	public static final Supplier<AttachmentType<Boolean>> DEFUSED = ATTACHMENT_TYPES.register("defused",
-			() -> AttachmentType.builder(() -> false).serialize(Codec.BOOL).sync((holder, player) -> hasMod(player), ByteBufCodecs.BOOL).build());
+			() -> AttachmentType.builder(() -> false).serialize(Codec.BOOL.fieldOf("defused")).sync((holder, player) -> hasMod(player), ByteBufCodecs.BOOL).build());
 
 	/**
 	 * Server-only: never saved or synced. The server alone runs the bomb timer and decides each cut. There is no default
@@ -82,15 +85,15 @@ public class NoCreeperExplodes {
 	}
 
 	private static void registerPayloads(RegisterPayloadHandlersEvent event) {
-		// Both handlers run on the main thread (the 1.21.1 default).
+		// Both handlers run on the main thread (NeoForge's default).
 		event.registrar("1")
 				// Only ever handled on the client; the lambda keeps the client class from loading on a dedicated server.
 				.playToClient(OpenWireCutPayload.TYPE, OpenWireCutPayload.CODEC, (payload, context) -> NoCreeperExplodesClient.openWireCut(payload))
 				.playToServer(CutWirePayload.TYPE, CutWirePayload.CODEC, NoCreeperExplodes::onCutWire);
 	}
 
-	public static ResourceLocation id(String path) {
-		return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
+	public static Identifier id(String path) {
+		return Identifier.fromNamespaceAndPath(MOD_ID, path);
 	}
 
 	public static NoCreeperExplodesConfig config() {
@@ -178,12 +181,33 @@ public class NoCreeperExplodes {
 		}
 	}
 
+	/**
+	 * An empty hand, or an item on the defuse_tools list (by id or #tag), can start cutting a creeper's wires. A client
+	 * checks its own settings file, which only decides whether the arm swings; the server's list is the one that counts.
+	 */
+	public static boolean canDefuseWith(ItemStack stack) {
+		if (stack.isEmpty()) {
+			return true;
+		}
+
+		for (String entry : config.defuseTools()) {
+			boolean isTag = entry.startsWith("#");
+			Identifier id = Identifier.tryParse(isTag ? entry.substring(1) : entry);
+
+			if (id != null && (isTag ? stack.is(TagKey.create(Registries.ITEM, id)) : BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(id))) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static InteractionResult onUseEntity(Player player, InteractionHand hand, Entity entity) {
 		if (!(entity instanceof Creeper creeper) || player.isSpectator() || !creeper.isAlive()) {
 			return InteractionResult.PASS;
 		}
 
-		boolean emptyMainHand = hand == InteractionHand.MAIN_HAND && player.getMainHandItem().isEmpty();
+		boolean defuseHand = hand == InteractionHand.MAIN_HAND && canDefuseWith(player.getMainHandItem());
 
 		if (isDefused(creeper)) {
 			if (player.getItemInHand(hand).is(ItemTags.CREEPER_IGNITERS)) {
@@ -191,18 +215,18 @@ public class NoCreeperExplodes {
 				return InteractionResult.FAIL;
 			}
 
-			if (!emptyMainHand) {
+			if (!defuseHand) {
 				return InteractionResult.PASS;
 			}
 
 			if (player instanceof ServerPlayer serverPlayer) {
-				serverPlayer.displayClientMessage(Component.translatable("message.nocreeperexplodes.already_defused"), true);
+				serverPlayer.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.already_defused"));
 			}
 
-			return InteractionResult.sidedSuccess(player.level().isClientSide());
+			return InteractionResult.SUCCESS;
 		}
 
-		if (!emptyMainHand) {
+		if (!defuseHand) {
 			return InteractionResult.PASS;
 		}
 
@@ -211,7 +235,7 @@ public class NoCreeperExplodes {
 		}
 
 		// On the client this swings the arm and lets the server decide.
-		return InteractionResult.sidedSuccess(player.level().isClientSide());
+		return InteractionResult.SUCCESS;
 	}
 
 	/** Starts the minigame for this player, unless someone else got there first, it's already armed, or they're too far away. */
@@ -220,7 +244,7 @@ public class NoCreeperExplodes {
 
 		if (session != null) {
 			if (session.walkedAway()) {
-				player.displayClientMessage(Component.translatable("message.nocreeperexplodes.armed"), true);
+				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.armed"));
 				return;
 			}
 
@@ -233,7 +257,7 @@ public class NoCreeperExplodes {
 			}
 
 			if (defuser != null) {
-				player.displayClientMessage(Component.translatable("message.nocreeperexplodes.busy"), true);
+				player.sendOverlayMessage(Component.translatable("message.nocreeperexplodes.busy"));
 				return;
 			}
 
@@ -244,7 +268,7 @@ public class NoCreeperExplodes {
 
 		if (!isWithinReach(player, creeper, distance)) {
 			String message = distance == 1.0 ? "message.nocreeperexplodes.too_far_one_block" : "message.nocreeperexplodes.too_far";
-			player.displayClientMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)), true);
+			player.sendOverlayMessage(Component.translatable(message, NoCreeperExplodesConfig.formatNumber(distance)));
 			return;
 		}
 

@@ -1,6 +1,6 @@
 package no.kvaksrud.nocreeperexplodes;
 
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import net.minecraft.server.level.ServerPlayer;
 

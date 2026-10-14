@@ -4,18 +4,21 @@ import com.mojang.blaze3d.platform.InputConstants;
 import no.kvaksrud.nocreeperexplodes.DefuseSession;
 import no.kvaksrud.nocreeperexplodes.NoCreeperExplodes;
 import no.kvaksrud.nocreeperexplodes.network.CutWirePayload;
-import org.jetbrains.annotations.Nullable;
 import org.joml.Vector2i;
+import org.jspecify.annotations.Nullable;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.monster.Creeper;
+
 
 /**
  * The bomb panel: three wires to choose from. Closing it early (Esc, or getting out of reach) walks away from
@@ -23,7 +26,7 @@ import net.minecraft.world.entity.monster.Creeper;
  * whose layout comes from tools/gen_textures.py; the constants below mirror it.
  */
 public class WireCutScreen extends Screen {
-	private static final ResourceLocation SHEET = NoCreeperExplodes.id("textures/gui/wire_cut.png");
+	private static final Identifier SHEET = NoCreeperExplodes.id("textures/gui/wire_cut.png");
 	private static final int SHEET_SIZE = 256;
 	private static final int PANEL_W = 176;
 	private static final int PANEL_H = 112;
@@ -75,15 +78,15 @@ public class WireCutScreen extends Screen {
 	private int nextBeepAge;
 	private int flashTicks;
 
+	/** Opens the panel for this creeper, replacing whatever screen is open. */
+	public static void open(int creeperId, double defuseDistance) {
+		Minecraft.getInstance().gui.setScreen(new WireCutScreen(creeperId, defuseDistance));
+	}
+
 	public WireCutScreen(int creeperId, double defuseDistance) {
 		super(Component.translatable("screen.nocreeperexplodes.title"));
 		this.creeperId = creeperId;
 		this.defuseDistance = defuseDistance;
-	}
-
-	/** Opens the panel for this creeper, replacing whatever screen is open. */
-	public static void open(int creeperId, double defuseDistance) {
-		Minecraft.getInstance().setScreen(new WireCutScreen(creeperId, defuseDistance));
 	}
 
 	@Override
@@ -98,10 +101,9 @@ public class WireCutScreen extends Screen {
 		return false;
 	}
 
-	/** Dims the world like an inventory does, rather than blurring it like a menu. */
 	@Override
-	public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-		this.renderTransparentBackground(graphics);
+	public boolean isInGameUi() {
+		return true;
 	}
 
 	private @Nullable Creeper creeper() {
@@ -184,22 +186,22 @@ public class WireCutScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		if (this.cutWire < 0 && !this.isTimeUp() && button == InputConstants.MOUSE_BUTTON_LEFT) {
-			int wire = this.wireAt(mouseX, mouseY);
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		// Not a literal 0: 26.3 moved from GLFW to SDL, where the left button is 1.
+		if (this.cutWire < 0 && !this.isTimeUp() && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+			int wire = this.wireAt(event.x(), event.y());
 			ClientPacketListener connection = this.minecraft.getConnection();
 
 			if (wire >= 0 && connection != null) {
 				this.cutWire = wire;
 				this.ageAtCut = this.age;
-				// 1.21.1 has no item.shears.snip yet; this plays the same sound file.
-				this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.SHEEP_SHEAR, 1.0F));
+				this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.SHEARS_SNIP, 1.0F));
 				connection.send(new CutWirePayload(this.creeperId, wire));
 				return true;
 			}
 		}
 
-		return super.mouseClicked(mouseX, mouseY, button);
+		return super.mouseClicked(event, doubleClick);
 	}
 
 	private boolean isTimeUp() {
@@ -228,33 +230,33 @@ public class WireCutScreen extends Screen {
 	}
 
 	@Override
-	public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-		super.render(graphics, mouseX, mouseY, partialTick);
+	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		super.extractRenderState(graphics, mouseX, mouseY, a);
 
-		graphics.blit(SHEET, this.left, this.top, 0, 0, PANEL_W, PANEL_H, SHEET_SIZE, SHEET_SIZE);
+		graphics.blit(RenderPipelines.GUI_TEXTURED, SHEET, this.left, this.top, 0, 0, PANEL_W, PANEL_H, SHEET_SIZE, SHEET_SIZE);
 
 		int hovered = this.cutWire < 0 && !this.isTimeUp() ? this.wireAt(mouseX, mouseY) : -1;
 
 		for (int i = 0; i < WIRE_ROWS.length; i++) {
 			int variant = i == this.cutWire ? VARIANT_CUT : i == hovered ? VARIANT_HOVER : VARIANT_INTACT;
 			int v = WIRE_SHEET_Y + (i * 3 + variant) * WIRE_H;
-			graphics.blit(SHEET, this.left + WIRE_X, this.top + WIRE_ROWS[i] - WIRE_H / 2, 0, v, WIRE_W, WIRE_H, SHEET_SIZE, SHEET_SIZE);
+			graphics.blit(RenderPipelines.GUI_TEXTURED, SHEET, this.left + WIRE_X, this.top + WIRE_ROWS[i] - WIRE_H / 2, 0, v, WIRE_W, WIRE_H, SHEET_SIZE, SHEET_SIZE);
 		}
 
-		this.renderTimer(graphics);
+		this.extractTimer(graphics);
 
-		graphics.drawCenteredString(this.font, this.title, this.width / 2, this.top - 14, TEXT_WHITE);
+		graphics.centeredText(this.font, this.title, this.width / 2, this.top - 14, TEXT_WHITE);
 		Component status = this.defusedFor >= 0 ? DEFUSED : this.cutWire >= 0 ? SNIP : this.isTimeUp() ? TIME_UP : HINT;
 		int statusColor = this.defusedFor >= 0 ? TEXT_GOOD : this.isTimeUp() ? TEXT_BAD : TEXT_HINT;
-		graphics.drawCenteredString(this.font, status, this.width / 2, this.top + PANEL_H + 6, statusColor);
+		graphics.centeredText(this.font, status, this.width / 2, this.top + PANEL_H + 6, statusColor);
 	}
 
-	private void renderTimer(GuiGraphics graphics) {
+	private void extractTimer(GuiGraphicsExtractor graphics) {
 		int x = this.left + PANEL_W / 2;
 		int y = this.top + LCD_TEXT_Y;
 
 		if (this.defusedFor >= 0) {
-			graphics.drawCenteredString(this.font, "SAFE", x, y, LCD_GREEN);
+			graphics.centeredText(this.font, "SAFE", x, y, LCD_GREEN);
 			return;
 		}
 
@@ -265,7 +267,7 @@ public class WireCutScreen extends Screen {
 		boolean blinkOff = seconds <= 5 && this.cutWire < 0 && (this.age / 5) % 2 == 1;
 
 		if (!blinkOff) {
-			graphics.drawCenteredString(this.font, String.format("%d:%02d", seconds / 60, seconds % 60), x, y, LCD_RED);
+			graphics.centeredText(this.font, String.format("%d:%02d", seconds / 60, seconds % 60), x, y, LCD_RED);
 		}
 	}
 }

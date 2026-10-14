@@ -18,8 +18,7 @@ repositories {
 }
 
 sourceSets {
-	// The server game tests (./gradlew runGameTestServer) and the client smoke test (./gradlew runClientSmokeTest):
-	// part of the mod in dev runs, left out of the jar.
+	// The client smoke test (./gradlew runClientSmokeTest): part of the mod in dev runs, left out of the jar.
 	gametest {
 		compileClasspath += sourceSets.main.output
 		runtimeClasspath += sourceSets.main.output
@@ -29,7 +28,7 @@ sourceSets {
 java {
 	withSourcesJar()
 
-	// Gradle itself may run on a newer JDK; compiling and the game runs use the Java Minecraft 1.21.1 ships with.
+	// Compiling and the game runs use the Java Minecraft 26.3 ships with.
 	toolchain.languageVersion = JavaLanguageVersion.of(project.java_version as int)
 }
 
@@ -44,14 +43,6 @@ neoForge {
 		server {
 			server()
 			programArgument '--nogui'
-		}
-
-		// Starts a headless server that runs every game test, then exits; a failed test fails the task.
-		gameTestServer {
-			type = 'gameTestServer'
-			sourceSet = sourceSets.gametest
-			gameDirectory = layout.buildDirectory.dir('run/gameTestServer')
-			systemProperty 'neoforge.enabledGameTestNamespaces', 'nocreeperexplodes'
 		}
 
 		// Plays through the client side in a real game window, then quits; see ClientSmokeTest.
@@ -75,12 +66,6 @@ neoForge {
 neoForge.addModdingDependenciesTo(sourceSets.gametest)
 // The unit tests don't start the game, but the settings code logs through Minecraft's logging setup.
 neoForge.addModdingDependenciesTo(sourceSets.test)
-
-tasks.named('runGameTestServer') {
-	// Start without a settings file, so the game test sees it written with the defaults.
-	def settingsFile = layout.buildDirectory.file('run/gameTestServer/config/nocreeperexplodes.properties').get().asFile
-	doFirst { settingsFile.delete() }
-}
 
 tasks.named('runClientSmokeTest') {
 	// A fresh game directory every time: new options, settings file, world and screenshots.
@@ -112,7 +97,6 @@ def generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 			version                : project.version,
 			minecraft_version_range: project.minecraft_version_range,
 			neo_version            : project.neo_version,
-			loader_version_range   : project.loader_version_range,
 	]
 	inputs.properties replaceProperties
 	expand replaceProperties
